@@ -1,0 +1,52 @@
+<!-- templates/advanced/contact.html -->
+{% extends 'advanced/base.html' %}
+
+{% block title %}About Us - YouTube Hate Detection{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h4 class="section-title">Our Mission</h4>
+                        <p class="mission-text">
+                            We are dedicated to making the internet a safer place by identifying and addressing hate speech 
+                            in online communities. Our AI-powered solution helps content moderators and platform owners 
+                            maintain healthy discussions while protecting users from harmful content.
+                        </p>
+                        
+                        <h4 class="section-title mt-4">What We Do</h4>
+                        <p class="about-text">
+                            Using advanced machine learning algorithms, we analyze YouTube comments in real-time to detect 
+                            potential hate speech and toxic content. Our system provides immediate feedback and helps 
+                            moderators take appropriate action quickly and effectively.
+                        </p>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="contact-form">
+                            <h4 class="section-title">Contact Us</h4>
+                            <form id="contact-form">
+                                <div class="mb-3">
+                                    <label for="name" class="form-label">Name</label>
+                                    <input type="text" class="form-control" id="name" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="email" class="form-label">Email</label>
+                                    <input type="email" class="form-control" id="email" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="message" class="form-label">Message</label>
+                                    <textarea class="form-control" id="message" rows="4" required></textarea>
+                                </div>
+                                <button type="submit" class="btn btn-primary">Send Message</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

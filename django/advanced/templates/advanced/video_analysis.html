@@ -1,0 +1,116 @@
+<!-- templates/advanced/video_analysis.html -->
+{% extends 'advanced/base.html' %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Video Analysis</h5>
+                <div class="form-group mb-3">
+                    <input type="text" id="video-url" class="form-control" placeholder="Enter YouTube URL">
+                </div>
+                <button id="analyze-btn" class="btn btn-primary">
+                    <span id="analyze-text">Analyze Comments</span>
+                    <span id="loading-spinner" class="spinner-border spinner-border-sm d-none"></span>
+                </button>
+            </div>
+        </div>
+        
+        <div id="video-container" class="mt-4"></div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Detected Hate Comments</h5>
+                <div id="results-container" class="results-scroll"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+document.getElementById('analyze-btn').addEventListener('click', async () => {
+    const button = document.getElementById('analyze-btn');
+    const spinner = document.getElementById('loading-spinner');
+    const analyzeText = document.getElementById('analyze-text');
+    const videoUrl = document.getElementById('video-url').value;
+    
+    if (!videoUrl) {
+        alert('Please enter a valid YouTube URL');
+        return;
+    }
+
+    try {
+        button.disabled = true;
+        spinner.classList.remove('d-none');
+        analyzeText.textContent = 'Analyzing...';
+
+        const videoId = videoUrl.split('v=')[1];
+        
+        document.getElementById('video-container').innerHTML = `
+            <iframe width="100%" height="315" 
+                    src="https://www.youtube.com/embed/${videoId}" 
+                    frameborder="0" 
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                    allowfullscreen></iframe>
+        `;
+        
+        const response = await fetch('/analyze/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({ video_url: videoUrl })
+        });
+        
+        const data = await response.json();
+        
+        const resultsContainer = document.getElementById('results-container');
+        resultsContainer.innerHTML = '';
+        
+        if (data.results.length === 0) {
+            resultsContainer.innerHTML = '<div class="alert alert-info">No hate comments detected.</div>';
+            return;
+        }
+        
+        data.results.forEach(result => {
+            if (result.is_toxic) {
+                resultsContainer.innerHTML += `
+                    <div class="alert alert-danger">
+                        <small>${result.text}</small>
+                    </div>
+                `;
+            }
+        });
+    } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred while analyzing the video');
+    } finally {
+        button.disabled = false;
+        spinner.classList.add('d-none');
+        analyzeText.textContent = 'Analyze Comments';
+    }
+});
+
+// Función auxiliar para obtener el token CSRF
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+</script>
+{% endblock %}
+{% endblock %}

@@ -1,0 +1,246 @@
+/* static/css/main.css */
+:root {
+    --primary-color: #2c3e50;
+    --secondary-color: #3498db;
+    --background-color: #f8f9fa;
+    --text-color: #2c3e50;
+    --danger-color: #e74c3c;
+}
+
+body {
+    background-color: var(--background-color);
+    color: var(--text-color);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.navbar {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.navbar-brand {
+    font-weight: bold;
+    font-size: 1.5rem;
+}
+
+.card {
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+    transition: transform 0.3s ease;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+}
+
+.card-title {
+    color: var(--primary-color);
+    font-weight: bold;
+    margin-bottom: 20px;
+}
+
+.form-control {
+    border-radius: 20px;
+    padding: 10px 20px;
+    border: 2px solid #e9ecef;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus {
+    border-color: var(--secondary-color);
+    box-shadow: none;
+}
+
+.btn-primary {
+    background-color: var(--secondary-color);
+    border: none;
+    border-radius: 20px;
+    padding: 10px 25px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+    background-color: #2980b9;
+    transform: translateY(-2px);
+}
+
+#video-container {
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+#results-container {
+    max-height: 500px;
+    overflow-y: auto;
+    padding-right: 10px;
+}
+
+#results-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+#results-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+#results-container::-webkit-scrollbar-thumb {
+    background: var(--secondary-color);
+    border-radius: 4px;
+}
+
+.alert-danger {
+    background-color: rgba(231, 76, 60, 0.1);
+    border: none;
+    border-left: 4px solid var(--danger-color);
+    border-radius: 4px;
+    margin-bottom: 10px;
+    padding: 10px 15px;
+}
+
+.loading-spinner {
+    display: none;
+    text-align: center;
+    margin: 20px 0;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid var(--secondary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto;
+}
+
+/* Navbar styles */
+.navbar {
+    background-color: #2c3e50;
+    padding: 1rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.navbar-brand {
+    font-weight: 600;
+}
+
+.nav-link {
+    color: #ecf0f1 !important;
+    transition: color 0.3s ease;
+}
+
+.nav-link:hover {
+    color: #3498db !important;
+}
+
+/* Card styles */
+.card {
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    margin-bottom: 1.5rem;
+}
+
+.card-title {
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+/* Video container styles */
+#video-container {
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+/* Results container styles */
+.results-scroll {
+    max-height: 500px;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
+.results-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+
+.results-scroll::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+
+.results-scroll::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 3px;
+}
+
+/* Alert styles */
+.alert {
+    margin-bottom: 0.5rem;
+    border-radius: 6px;
+}
+
+/* Metric cards */
+.metric-card {
+    border-radius: 8px;
+    padding: 1.5rem;
+    height: 100%;
+    color: white;
+    text-align: center;
+}
+
+.metric-card.accuracy { background-color: #3498db; }
+.metric-card.precision { background-color: #2ecc71; }
+.metric-card.recall { background-color: #9b59b6; }
+.metric-card.f1 { background-color: #f1c40f; }
+
+.metric-value {
+    font-size: 2rem;
+    font-weight: bold;
+    margin-top: 0.5rem;
+}
+
+/* About page styles */
+.section-title {
+    color: #2c3e50;
+    font-weight: 600;
+    margin-bottom: 1rem;
+}
+
+.mission-text, .about-text {
+    color: #34495e;
+    line-height: 1.6;
+}
+
+.contact-form {
+    background-color: #f8f9fa;
+    padding: 1.5rem;
+    border-radius: 8px;
+}
+
+/* Button styles */
+.btn-primary {
+    background-color: #3498db;
+    border-color: #3498db;
+    transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+    background-color: #2980b9;
+    border-color: #2980b9;
+}
+
+/* Spinner styles */
+.spinner-border-sm {
+    margin-left: 0.5rem;
+    vertical-align: middle;
+}
