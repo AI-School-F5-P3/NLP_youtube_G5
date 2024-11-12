@@ -10,6 +10,9 @@ from .utils import get_youtube_comments
 import json
 import logging
 from advanced.train_model import train_model
+from .tasks import analyze_comments_periodically
+from celery import current_app
+from django.db import IntegrityError
 
 # Configurar logger
 logger = logging.getLogger(__name__)
@@ -89,38 +92,41 @@ class VideoAnalysisView(View):
                     # Validar que el comentario tenga texto
                     if not comment.get('text'):
                         continue
-                        
-                    prediction = self.model.predict(comment['text'])
-                    
-                    # Guardar comentario
-                    Comment.objects.create(
-                        video=video,
-                        comment_id=comment['id'],
-                        text=comment['text'],
-                        is_toxic=prediction['is_toxic']
-                    )
-                    
-                    results.append({
-                        'text': comment['text'],
-                        'is_toxic': prediction['is_toxic'],
-                        'confidence': prediction['confidence']
-                    })
+
+                    # Comprobar si el comentario ya existe
+                    existing_comment = Comment.objects.filter(video=video, comment_id=comment['id']).exists()
+
+                    if not existing_comment:
+                        prediction = self.model.predict(comment['text'])
+                        try:
+                            # Guardar comentario
+                            Comment.objects.create(
+                                video=video,
+                                comment_id=comment['id'],
+                                text=comment['text'],
+                                is_toxic=prediction['is_toxic']
+                            )
+                            
+                            # Agregar el resultado a la lista de resultados
+                            results.append({
+                                'comment_id': comment['id'],
+                                'text': comment['text'],
+                                'is_toxic': prediction['is_toxic']
+                            })
+                        except IntegrityError:
+                            # Si ya existe el comentario, lo registramos como duplicado
+                            logger.info(f"Comment {comment['id']} already exists in the database.")
+                    else:
+                        logger.info(f"Comment {comment['id']} already exists in the database.")
+
                 except Exception as e:
-                    logger.error(f"Error processing comment {comment.get('id')}: {str(e)}")
-                    continue
-            
-            if not results:
-                return JsonResponse({
-                    'error': 'No comments could be processed'
-                }, status=404)
-            
+                    logger.error(f"Error processing comment {comment.get('id', 'unknown')}: {str(e)}")
+
             return JsonResponse({
                 'video_id': video_id,
-                'total_comments': len(comments),
-                'processed_comments': len(results),
                 'results': results
-            })
-            
+            }, status=200)
+
         except Exception as e:
             logger.error(f"Unexpected error in video analysis: {str(e)}")
             return JsonResponse({
@@ -136,3 +142,34 @@ def metrics_view(request):
 # Vista sobre nosotros
 def about_view(request):
     return render(request, 'advanced/about.html')
+
+# Sistema de administración para iniciar o detener el seguimiento en tiempo real
+@method_decorator(csrf_exempt, name='dispatch')
+class VideoManagementView(View):
+    def get(self, request):
+        # Renderizar la plantilla con la opción de iniciar o detener el seguimiento
+        videos = Video.objects.all()
+        return render(request, 'advanced/video_analysis.html', {'videos': videos})
+
+    def post(self, request):
+        # Obtener el ID del video y la acción (iniciar o detener)
+        data = json.loads(request.body)
+        video_id = data.get('video_id')
+        action = data.get('action')  # 'start' o 'stop'
+
+        if not video_id or not action:
+            return JsonResponse({'error': 'Invalid request data'}, status=400)
+
+        if action == 'start':
+            # Iniciar la tarea de seguimiento
+            task = analyze_comments_periodically.apply_async((video_id,), countdown=0, interval=600)  # Intervalo de 10 minutos
+            return JsonResponse({'status': f'Task started for video {video_id}', 'task_id': task.id}, status=200)
+        
+        elif action == 'stop':
+            # Detener todas las tareas asociadas a un video específico
+            for task in current_app.control.inspect().active().values():
+                if task[0]['args'][1:-1] == video_id:  # Verificar si la tarea coincide con el video_id
+                    current_app.control.revoke(task['id'], terminate=True)
+            return JsonResponse({'status': f'Task stopped for video {video_id}'}, status=200)
+
+        return JsonResponse({'error': 'Invalid action'}, status=400)

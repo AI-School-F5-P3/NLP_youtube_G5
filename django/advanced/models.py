@@ -11,7 +11,7 @@ class Video(models.Model):
 
 class Comment(models.Model):
     video = models.ForeignKey(Video, on_delete=models.CASCADE)
-    comment_id = models.CharField(max_length=100)
+    comment_id = models.CharField(max_length=100, unique=True)
     text = models.TextField()
     is_toxic = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -28,6 +28,13 @@
             </div>
         </div>
     </div>
+    {% for video in videos %}
+    <div>
+        <h4>{{ video.url }}</h4>
+        <button onclick="manageTask('{{ video.video_id }}', 'start')">Start Monitoring</button>
+        <button onclick="manageTask('{{ video.video_id }}', 'stop')">Stop Monitoring</button>
+    </div>
+    {% endfor %}
 </div>
 
 {% block extra_js %}
@@ -96,6 +103,20 @@ document.getElementById('analyze-btn').addEventListener('click', async () => {
     }
 });
 
+// controlar el inicio y la detención del seguimiento
+function manageTask(videoId, action) {
+    fetch('/manage-task/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify({ video_id: videoId, action: action })
+    })
+    .then(response => response.json())
+    .then(data => alert(data.status || data.error));
+}
+
 // Función auxiliar para obtener el token CSRF
 function getCookie(name) {
     let cookieValue = null;
@@ -110,6 +131,25 @@ function getCookie(name) {
         }
     }
     return cookieValue;
+}
+// función manageTask actualizada para async/await
+async function manageTask(videoId, action) {
+    try {
+        const response = await fetch('/manage-task/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify({ video_id: videoId, action: action })
+        });
+
+        const result = await response.json();
+        alert(result.status || result.error);
+    } catch (error) {
+        console.error('Error managing task:', error);
+        alert('An error occurred. Please check the console for details.');
+    }
 }
 </script>
 {% endblock %}

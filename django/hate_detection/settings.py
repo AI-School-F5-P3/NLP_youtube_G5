@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 
 from pathlib import Path
 import os
+from celery.schedules import crontab
 from dotenv import load_dotenv
 # Cargar el archivo .env
 load_dotenv()
@@ -92,9 +93,11 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD'),
         'HOST': os.getenv('DB_HOST'),
         'PORT': os.getenv('DB_PORT'),
+        'OPTIONS': {
+            'charset': 'utf8mb4'
+        }
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
@@ -143,3 +146,11 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'static/media')
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+CELERY_BEAT_SCHEDULE = {
+    'analyze-comments-every-5-mins': {
+        'task': 'advanced.tasks.analyze_comments_periodically',
+        'schedule': crontab(minute='*/5'),  # Cada 5 minutos
+        'args': ('<video_id>',),  # Reemplaza <video_id> por un valor dinámico en la práctica
+    },
+}

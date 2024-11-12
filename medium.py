@@ -15,10 +15,12 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import googleapiclient.discovery
+import os
+from dotenv import load_dotenv
 
 class YouTubeCommentScraper:
     def __init__(self):
-        self.api_key = 'AIzaSyAnz3_21wonjoG6DuwwAIbdyius7f955jk'
+        self.api_key = os.getenv("YOUTUBE_API_KEY")
         self.youtube = googleapiclient.discovery.build('youtube', 'v3', developerKey=self.api_key)
 
     def extract_video_id(self, url):
@@ -184,5 +186,21 @@ def create_streamlit_app():
                     except Exception as e:
                         st.error(f"Error al analizar el video: {str(e)}")
 
-if __name__ == '__main__':
+# Entrenamiento del modelo y guardado del archivo .pkl
+if __name__ == "__main__":
+    # Cargar los datos de entrenamiento
+    df = pd.read_csv('youtoxic_english_1000.csv')
+    
+    # Crear y entrenar el detector de mensajes de odio
+    detector = HateSpeechDetector()
+    metrics = detector.train(df)
+    print("Métricas del modelo:")
+    for key, value in metrics.items():
+        print(f"{key}: {value}")
+    print(f"Classification Report:\n{metrics['classification_report']}")
+    
+    # Guardar el modelo entrenado
+    detector.save_model('hate_speech_model_enhanced.pkl')
+
+    # Ahora puedes cargar y usar el modelo guardado en la interfaz Streamlit
     create_streamlit_app()
