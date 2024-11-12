@@ -5,9 +5,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
 import streamlit as st
-import pickle
+import joblib
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import cross_val_score
 
 class HateSpeechDetector:
@@ -15,13 +14,12 @@ class HateSpeechDetector:
         # Usar pipeline para estandarizar el proceso
         self.pipeline = Pipeline([
             ('vectorizer', TfidfVectorizer(
-                max_features=3000,  # Reducido para evitar overfitting
+                max_features=1000,  # Reducido para evitar overfitting
                 ngram_range=(1, 2),
                 min_df=2,  # Ignorar términos que aparecen en menos de 2 documentos
                 max_df=0.95,  # Ignorar términos que aparecen en más del 95% de los documentos
                 stop_words='english'
             )),
-            ('scaler', StandardScaler(with_mean=False)),  # Normalizar características
             ('classifier', LogisticRegression(
                 C=0.1,  # Aumentar regularización
                 class_weight='balanced',  # Manejar desbalance de clases
@@ -33,8 +31,7 @@ class HateSpeechDetector:
     def prepare_target(self, df):
         """Combina todas las columnas objetivo en una sola etiqueta de odio"""
         hate_columns = ['IsToxic', 'IsAbusive', 'IsThreat', 'IsProvocative', 
-                       'IsObscene', 'IsHatespeech', 'IsRacist', 'IsNationalist', 
-                       'IsSexist', 'IsHomophobic', 'IsReligiousHate', 'IsRadicalism']
+                       'IsObscene', 'IsHatespeech', 'IsRacist']
         return (df[hate_columns].sum(axis=1) > 0).astype(int)
     
     def train(self, df):
@@ -51,7 +48,7 @@ class HateSpeechDetector:
         # Entrenamiento
         self.pipeline.fit(X_train, y_train)
         
-        # Evaluación con validación cruzada
+        # # Evaluación con validación cruzada
         cv_scores = cross_val_score(self.pipeline, X_train, y_train, cv=5)
         
         # Predicciones finales
@@ -78,19 +75,17 @@ class HateSpeechDetector:
     
     def save_model(self, path):
         """Guarda el modelo entrenado"""
-        with open(path, 'wb') as f:
-            pickle.dump(self.pipeline, f)
+        joblib.dump(self.pipeline, path)
     
     @classmethod
     def load_model(cls, path):
         """Carga un modelo guardado"""
         detector = cls()
-        with open(path, 'rb') as f:
-            detector.pipeline = pickle.load(f)
+        detector.pipeline = joblib.load(path)
         return detector
 
 # Interfaz Streamlit
-def create_streamlit_app():
+def create_streamlit_app(detector, metrics):
     st.title("Detector de Mensajes de Odio")
     
     # Cargar modelo
@@ -114,6 +109,21 @@ def create_streamlit_app():
                 st.success("✅ Este texto parece seguro.")
         else:
             st.warning("Por favor, introduce algún texto para analizar.")
+            
+        st.subheader("Métricas del modelo:")
+        metrics_df = pd.DataFrame({
+            'Métrica': ['Precisión de entrenamiento', 'Precisión de prueba', 'Promedio de validación cruzada', 'Desviación estándar de validación cruzada', 'Overfitting'],
+            'Valor': [
+                f"{metrics['train_accuracy']:.4f}",
+                f"{metrics['test_accuracy']:.4f}",
+                f"{metrics['cv_scores_mean']:.4f}",
+                f"{metrics['cv_scores_std']:.4f}",
+                f"{metrics['overfitting']:.4f}"
+            ]
+        })
+        st.table(metrics_df)
+    else:
+        st.warning("Por favor, introduce algún texto para analizar.")
 
 if __name__ == "__main__":
     # Cargar y entrenar el modelo
@@ -123,9 +133,10 @@ if __name__ == "__main__":
     print("Métricas del modelo:")
     for key, value in metrics.items():
         print(f"{key}: {value}")
+    print(f"Classification Report:\n{metrics['classification_report']}")
     
     # Guardar el modelo
     detector.save_model('hate_speech_model.pkl')
     
     # Ejecutar la app
-    create_streamlit_app()
+    create_streamlit_app(detector, metrics)

@@ -1,0 +1,9 @@
+pandas
+numpy==1.24.3
+scikit-learn
+streamlit
+requests
+bs4
+google-api-python-client
+torch
+transformers
