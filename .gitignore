@@ -160,6 +160,7 @@ __pycache__/
 # Ignore folder with brain images
 stroke_prediction_project/notebooks/Brain_Data_Organised/
 
-# Ignore .h5, pth files
+# Ignore .h5, pth and .pkl files
 *.h5
 *.pth
+*.pkl
