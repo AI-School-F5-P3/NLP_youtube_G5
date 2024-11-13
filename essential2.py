@@ -8,7 +8,6 @@ from sklearn.metrics import classification_report
 import streamlit as st
 import joblib
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import cross_val_score
 
 # Cargar el modelo de lenguaje de spacy para lematización

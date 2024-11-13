@@ -18,6 +18,8 @@ import googleapiclient.discovery
 import os
 from dotenv import load_dotenv
 
+# Cargar las variables de entorno desde el archivo .env
+load_dotenv()
 class YouTubeCommentScraper:
     def __init__(self):
         self.api_key = os.getenv("YOUTUBE_API_KEY")
@@ -85,7 +87,7 @@ class HateSpeechDetector:
     def prepare_target(self, df):
         hate_columns = ['IsToxic', 'IsAbusive', 'IsThreat', 'IsProvocative',
                        'IsObscene', 'IsHatespeech', 'IsRacist', 'IsNationalist',
-                       'IsSexist', 'IsHomophobic', 'IsReligiousHate', 'IsRadicalism']
+                       'IsSexist', 'IsReligiousHate']
         return (df[hate_columns].sum(axis=1) > 0).astype(int)
 
     def train(self, df):
