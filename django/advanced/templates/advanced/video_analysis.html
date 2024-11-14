@@ -27,7 +27,7 @@
                     <div class="video-item mb-3 p-3 border rounded">
                         <h6>{{ video.url }}</h6>
                         <div class="btn-group">
-                            <button class="btn btn-success btn-sm" onclick="manageTask('{{ video.video_id }}', 'start')">
+                            <button class="btn btn-success btn-sm" onclick="startMonitoring('{{ video.video_id }}')">
                                 Start Monitoring
                             </button>
                             <button class="btn btn-danger btn-sm" onclick="manageTask('{{ video.video_id }}', 'stop')">
@@ -106,23 +106,7 @@ document.getElementById('analyze-btn').addEventListener('click', async () => {
             throw new Error(data.error || 'Error analyzing video');
         }
         
-        const resultsContainer = document.getElementById('results-container');
-        resultsContainer.innerHTML = '';
-        
-        if (data.results.length === 0) {
-            resultsContainer.innerHTML = '<div class="alert alert-info">No hate comments detected.</div>';
-            return;
-        }
-        
-        data.results.forEach(result => {
-            if (result.is_toxic) {
-                resultsContainer.innerHTML += `
-                    <div class="alert alert-danger">
-                        <small>${result.text}</small>
-                    </div>
-                `;
-            }
-        });
+        updateResults(data.results);
     } catch (error) {
         console.error('Error:', error);
         alert(error.message || 'An error occurred while analyzing the video');
@@ -132,6 +116,44 @@ document.getElementById('analyze-btn').addEventListener('click', async () => {
         analyzeText.textContent = 'Analyze Comments';
     }
 });
+
+function updateResults(results) {
+    const resultsContainer = document.getElementById('results-container');
+    resultsContainer.innerHTML = '';
+    
+    if (results.length === 0) {
+        resultsContainer.innerHTML = '<div class="alert alert-info">No hate comments detected.</div>';
+        return;
+    }
+    
+    results.forEach(result => {
+        if (result.is_toxic) {
+            resultsContainer.innerHTML += `
+                <div class="alert alert-danger d-flex justify-content-between align-items-center">
+                    <div class="flex-grow-1">
+                        <small>${result.text}</small>
+                    </div>
+                    <div class="badge bg-danger ml-2">
+                        ${(result.probability * 100).toFixed(1)}%
+                    </div>
+                </div>
+            `;
+        }
+    });
+}
+
+function startMonitoring(videoId) {
+    const eventSource = new EventSource(`/monitor/${videoId}/`);
+    
+    eventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        updateResults(data.results);
+    };
+    
+    eventSource.onerror = function() {
+        eventSource.close();
+    };
+}
 
 async function manageTask(videoId, action) {
     try {
@@ -151,7 +173,6 @@ async function manageTask(videoId, action) {
         
         alert(data.status);
         
-        // Recargar la página para actualizar la lista de videos si es necesario
         if (action === 'start' || action === 'stop') {
             location.reload();
         }
@@ -175,8 +196,6 @@ function getCookie(name) {
     }
     return cookieValue;
 }
-
-// Añadir estilos CSS necesarios
 </script>
 
 <style>
