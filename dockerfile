@@ -1,24 +1,21 @@
-# Usar una imagen base de Python
-FROM python:3.9-slim
-
-# Establecer el directorio de trabajo en el contenedor
-WORKDIR /app
-
-# Copiar los archivos del proyecto al contenedor
-COPY . /app
+FROM python:3.9
 
 # Instalar dependencias del sistema
-RUN apt-get update && apt-get install -y \
-    libpq-dev \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    default-libmysqlclient-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Instalar las dependencias de Python desde el archivo requirements.txt
-RUN pip install --upgrade pip
-COPY requirements.txt /app/requirements.txt
-RUN pip install -r requirements.txt
+WORKDIR /app
 
-# Exponer el puerto que usará Streamlit (por defecto es el 8501)
-EXPOSE 8501
+# Copiar requirements.txt primero para aprovechar la caché de Docker
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Comando para ejecutar la aplicación con Streamlit
-CMD ["streamlit", "run", "advance_improved.py"]
+# Copiar el resto del proyecto
+COPY . .
+
+# Crear un script para esperar a que la base de datos esté disponible
+COPY wait_for_db.py .
+
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]

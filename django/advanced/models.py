@@ -14,6 +14,7 @@ class Comment(models.Model):
     comment_id = models.CharField(max_length=100, unique=True)
     text = models.TextField()
     is_toxic = models.BooleanField(default=False)
+    probability = models.FloatField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:

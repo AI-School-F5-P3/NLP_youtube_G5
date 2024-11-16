@@ -92,30 +92,47 @@ class VideoAnalysisView(View):
             }, status=500)
         
         results = []
+        processed_comment_ids = set()
+        
+        # Primero, obtener comentarios existentes
+        existing_comments = Comment.objects.filter(
+            video=video,
+            is_toxic=True
+        ).values('comment_id', 'text', 'is_toxic', 'probability')
+        
+        for comment in existing_comments:
+            results.append({
+                'comment_id': comment['comment_id'],
+                'text': comment['text'],
+                'is_toxic': comment['is_toxic'],
+                'probability': comment['probability']
+            })
+            processed_comment_ids.add(comment['comment_id'])
+            
+        # Procesar nuevos comentarios
         for comment in comments:
-            if not comment.get('text'):
-                continue  # Saltar comentarios vacíos
-
-            # Comprobar si el comentario ya existe en la base de datos
-            if Comment.objects.filter(video=video, comment_id=comment['id']).exists():
-                logger.info(f"Comment {comment['id']} already exists in the database.")
-                continue  # Saltar comentarios duplicados
+            if not comment.get('text') or comment['id'] in processed_comment_ids:
+                continue
 
             try:
                 analysis_result = self.model.predict(comment['text'])
-                Comment.objects.create(
-                    video=video,
-                    comment_id=comment['id'],
-                    text=comment['text'],
-                    is_toxic=analysis_result['is_toxic']
-                )
-                results.append({
-                    'comment_id': comment['id'],
-                    'text': comment['text'],
-                    'is_toxic': analysis_result['is_toxic']
-                })
-            except IntegrityError:
-                logger.info(f"Comment {comment['id']} already exists in the database.")
+                if analysis_result['is_toxic']:  # Solo procesar si es tóxico
+                    try:
+                        Comment.objects.create(
+                            video=video,
+                            comment_id=comment['id'],
+                            text=comment['text'],
+                            is_toxic=analysis_result['is_toxic'],
+                            probability=analysis_result['probability']
+                        )
+                        results.append({
+                            'comment_id': comment['id'],
+                            'text': comment['text'],
+                            'is_toxic': analysis_result['is_toxic'],
+                            'probability': analysis_result['probability']
+                        })
+                    except IntegrityError:
+                        logger.info(f"Comment {comment['id']} already exists in the database.")
             except Exception as e:
                 logger.error(f"Error processing comment {comment['id']}: {str(e)}")
 

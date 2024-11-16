@@ -1,3 +1,4 @@
+# advanced/train_model.py
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
@@ -6,7 +7,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import joblib
-from transformers import BertTokenizer
+from transformers import BertTokenizer, BertModel
 import os
 import logging
 from tqdm import tqdm
@@ -15,39 +16,28 @@ from tqdm import tqdm
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Obtener la ruta absoluta del directorio actual
+# Definir directorios
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(BASE_DIR, 'models')
+if not os.path.exists(MODELS_DIR):
+    os.makedirs(MODELS_DIR)
 
-class HateDetectionLSTM(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim, n_layers=2, dropout=0.3, bidirectional=True):
-        super(HateDetectionLSTM, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, embedding_dim)
-        self.n_layers = n_layers
-        self.hidden_dim = hidden_dim
-        self.bidirectional = bidirectional
-        self.lstm = nn.LSTM(embedding_dim, 
-                           hidden_dim, 
-                           n_layers, 
-                           batch_first=True,
-                           dropout=dropout if n_layers > 1 else 0,
-                           bidirectional=bidirectional)
+# Definir modelo de clasificación con BERT
+class BertHateDetectionModel(nn.Module):
+    def __init__(self, hidden_dim=768, dropout=0.3):
+        super(BertHateDetectionModel, self).__init__()
+        self.bert = BertModel.from_pretrained('bert-base-uncased')
         self.dropout = nn.Dropout(dropout)
-        self.fc = nn.Linear(hidden_dim * (2 if bidirectional else 1), 1)
+        self.fc = nn.Linear(hidden_dim, 1)
         self.sigmoid = nn.Sigmoid()
         
-    def forward(self, x, hidden):
-        embedded = self.embedding(x)
-        output, hidden = self.lstm(embedded, hidden)
-        output = self.dropout(output)
-        output = self.fc(output[:, -1, :])
-        return self.sigmoid(output), hidden
-    
-    def init_hidden(self, batch_size, device):
-        num_directions = 2 if self.bidirectional else 1
-        return (torch.zeros(self.n_layers * num_directions, batch_size, self.hidden_dim).to(device),
-                torch.zeros(self.n_layers * num_directions, batch_size, self.hidden_dim).to(device))
+    def forward(self, input_ids, attention_mask):
+        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        pooled_output = outputs.pooler_output
+        pooled_output = self.dropout(pooled_output)
+        return self.sigmoid(self.fc(pooled_output))
 
+# Dataset personalizado
 class HateCommentDataset(Dataset):
     def __init__(self, texts, labels, tokenizer, max_len=128):
         self.texts = texts
@@ -62,36 +52,22 @@ class HateCommentDataset(Dataset):
         text = str(self.texts[idx])
         label = self.labels[idx]
         
-        encoding = self.tokenizer(text, 
-                                truncation=True,
-                                max_length=self.max_len,
-                                padding='max_length',
-                                return_tensors='pt')
+        encoding = self.tokenizer.encode_plus(
+            text,
+            add_special_tokens=True,
+            max_length=self.max_len,
+            return_token_type_ids=False,
+            padding='max_length',
+            truncation=True,
+            return_attention_mask=True,
+            return_tensors='pt',
+        )
         
         return {
             'input_ids': encoding['input_ids'].flatten(),
             'attention_mask': encoding['attention_mask'].flatten(),
             'label': torch.tensor(label, dtype=torch.float)
         }
-
-class EarlyStopping:
-    def __init__(self, patience=5, min_delta=0.001):
-        self.patience = patience
-        self.min_delta = min_delta
-        self.counter = 0
-        self.best_loss = None
-        self.early_stop = False
-        
-    def __call__(self, val_loss):
-        if self.best_loss is None:
-            self.best_loss = val_loss
-        elif val_loss > self.best_loss - self.min_delta:
-            self.counter += 1
-            if self.counter >= self.patience:
-                self.early_stop = True
-        else:
-            self.best_loss = val_loss
-            self.counter = 0
 
 def evaluate_model(model, data_loader, criterion, device):
     model.eval()
@@ -102,11 +78,10 @@ def evaluate_model(model, data_loader, criterion, device):
     with torch.no_grad():
         for batch in data_loader:
             input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
             labels = batch['label'].to(device)
             
-            hidden = model.init_hidden(input_ids.size(0), device)
-            outputs, _ = model(input_ids, hidden)
-            
+            outputs = model(input_ids, attention_mask=attention_mask)
             loss = criterion(outputs.squeeze(), labels)
             total_loss += loss.item()
             
@@ -125,9 +100,6 @@ def evaluate_model(model, data_loader, criterion, device):
     return metrics
 
 def train_model():
-    if not os.path.exists(MODELS_DIR):
-        os.makedirs(MODELS_DIR)
-    
     # Cargar y preparar datos
     logger.info("Loading dataset...")
     csv_path = os.path.join(os.path.dirname(BASE_DIR), 'youtoxic_english_1000.csv')
@@ -138,17 +110,13 @@ def train_model():
                     'IsSexist', 'IsReligiousHate']
     
     df['is_toxic'] = df[toxic_columns].any(axis=1).astype(int)
-    
     X = df['Text'].values
     y = df['is_toxic'].values
     
-    # Mostrar distribución de clases
     logger.info(f"Class distribution: {np.bincount(y)}")
     
     # Split del dataset
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     
     # Configurar tokenizer
     logger.info("Setting up tokenizer...")
@@ -164,53 +132,27 @@ def train_model():
     class_counts = np.bincount(y_train)
     class_weights = 1. / class_counts
     sample_weights = [class_weights[label] for label in y_train]
-    sampler = WeightedRandomSampler(
-        weights=sample_weights,
-        num_samples=len(sample_weights),
-        replacement=True
-    )
+    sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
     
-    # Hiperparámetros
-    BATCH_SIZE = 32
-    EPOCHS = 30
-    LEARNING_RATE = 0.001
-    VOCAB_SIZE = tokenizer.vocab_size
-    EMBEDDING_DIM = 300
-    HIDDEN_DIM = 256
-    N_LAYERS = 2
-    DROPOUT = 0.5
-    BIDIRECTIONAL = True
+    # Configuración de entrenamiento
+    BATCH_SIZE = 16
+    EPOCHS = 10
+    LEARNING_RATE = 2e-5
     
-    # Usar el sampler en el DataLoader
-    train_loader = DataLoader(
-        train_dataset, 
-        batch_size=BATCH_SIZE, 
-        sampler=sampler
-    )
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=sampler)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
     
-    # Configurar dispositivo
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Using device: {device}")
     
-    # Crear modelo
-    model = HateDetectionLSTM(
-        VOCAB_SIZE, EMBEDDING_DIM, HIDDEN_DIM, N_LAYERS, DROPOUT, BIDIRECTIONAL
-    )
+    model = BertHateDetectionModel()
     model.to(device)
     
-    # Configurar criterion y optimizer
     criterion = nn.BCELoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.1, patience=3, verbose=True
-    )
-    
-    # Early stopping
-    early_stopping = EarlyStopping(patience=5)
-    best_f1 = 0
     
     # Entrenamiento
+    best_f1 = 0
     logger.info("Starting training...")
     for epoch in range(EPOCHS):
         model.train()
@@ -219,65 +161,40 @@ def train_model():
         
         for batch in progress_bar:
             input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
             labels = batch['label'].to(device)
             
-            hidden = model.init_hidden(input_ids.size(0), device)
-            
             optimizer.zero_grad()
-            outputs, hidden = model(input_ids, hidden)
-            
+            outputs = model(input_ids, attention_mask=attention_mask)
             loss = criterion(outputs.squeeze(), labels)
             loss.backward()
-            
-            # Gradient clipping
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            
             optimizer.step()
             total_loss += loss.item()
             
             progress_bar.set_postfix({'loss': f'{loss.item():.4f}'})
         
         avg_train_loss = total_loss / len(train_loader)
-        
-        # Evaluación
         metrics = evaluate_model(model, test_loader, criterion, device)
         
         logger.info(f"Epoch {epoch + 1}/{EPOCHS}")
         logger.info(f"Average Training Loss: {avg_train_loss:.4f}")
         logger.info(f"Validation Metrics: {metrics}")
         
-        # Actualizar learning rate
-        scheduler.step(metrics['loss'])
-        
-        # Early stopping check
-        early_stopping(metrics['loss'])
-        
-        # Guardar mejor modelo
         if metrics['f1_score'] > best_f1:
             best_f1 = metrics['f1_score']
             logger.info(f"New best F1 score: {best_f1:.2f}%")
             
-            # Guardar modelo
-            model_path = os.path.join(MODELS_DIR, 'lstm_model.pth')
+            model_path = os.path.join(MODELS_DIR, 'bert_model.pth')
             torch.save(model.state_dict(), model_path)
             
-            # Guardar configuración y métricas
             config = {
-                'vocab_size': VOCAB_SIZE,
-                'embedding_dim': EMBEDDING_DIM,
-                'hidden_dim': HIDDEN_DIM,
-                'metrics': metrics,
-                'n_layers': N_LAYERS,
-                'dropout': DROPOUT,
-                'bidirectional': BIDIRECTIONAL
+                'hidden_dim': 768,
+                'dropout': 0.3,
+                'max_len': 128,
+                'metrics': metrics
             }
-            
             config_path = os.path.join(MODELS_DIR, 'model_config.pkl')
             joblib.dump(config, config_path)
-        
-        if early_stopping.early_stop:
-            logger.info("Early stopping triggered")
-            break
     
     logger.info("Training completed!")
     return metrics

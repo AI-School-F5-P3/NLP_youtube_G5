@@ -21,21 +21,14 @@
         <!-- Sección de monitoreo -->
         <div class="card mt-4">
             <div class="card-body">
-                <h5 class="card-title">Video Monitoring</h5>
-                <div class="video-list">
-                    {% for video in videos %}
-                    <div class="video-item mb-3 p-3 border rounded">
-                        <h6>{{ video.url }}</h6>
-                        <div class="btn-group">
-                            <button class="btn btn-success btn-sm" onclick="startMonitoring('{{ video.video_id }}')">
-                                Start Monitoring
-                            </button>
-                            <button class="btn btn-danger btn-sm" onclick="manageTask('{{ video.video_id }}', 'stop')">
-                                Stop Monitoring
-                            </button>
-                        </div>
-                    </div>
-                    {% endfor %}
+                <h5 class="card-title">Real-Time Analysis Control</h5>
+                <div class="d-flex justify-content-center">
+                    <button id="start-analysis" class="btn btn-success mx-2" onclick="startMonitoring('{{ video.video_id }}')">
+                        Start
+                    </button>
+                    <button id="stop-analysis" class="btn btn-danger mx-2" onclick="manageTask('{{ video.video_id }}', 'stop')">
+                        Stop
+                    </button>
                 </div>
             </div>
         </div>
@@ -45,7 +38,14 @@
         <div class="card">
             <div class="card-body">
                 <h5 class="card-title">Detected Hate Comments</h5>
-                <div id="results-container" class="results-scroll"></div>
+                <div id="results-container" class="results-scroll">
+                    {% for comment in comments %}
+                    <div class="comment-item mb-3 p-2 border rounded">
+                        <p>{{ comment.text }}</p>
+                        <p class="text-end">Probability: {{ comment.probability|floatformat:2 }}%</p>
+                    </div>
+                    {% endfor %}
+                </div>
             </div>
         </div>
     </div>
