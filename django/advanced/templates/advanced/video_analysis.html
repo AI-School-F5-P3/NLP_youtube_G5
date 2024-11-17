@@ -55,73 +55,42 @@
 
 {% block extra_js %}
 <script>
-document.getElementById('analyze-btn').addEventListener('click', async () => {
-    const button = document.getElementById('analyze-btn');
-    const spinner = document.getElementById('loading-spinner');
-    const analyzeText = document.getElementById('analyze-text');
-    const videoUrl = document.getElementById('video-url').value;
+// Función para actualizar el contenedor del video
+function updateVideoContainer(videoId) {
+    document.getElementById('video-container').innerHTML = `
+        <iframe width="100%" height="315" 
+                src="https://www.youtube.com/embed/${videoId}" 
+                frameborder="0" 
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                allowfullscreen></iframe>
+    `;
+}
+
+// Función para analizar el video
+async function analyzeVideo(videoUrl) {
+    const response = await fetch('/analyze/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({ video_url: videoUrl })
+    });
     
-    if (!videoUrl) {
-        alert('Please enter a valid YouTube URL');
-        return;
-    }
-
-    try {
-        button.disabled = true;
-        spinner.classList.remove('d-none');
-        analyzeText.textContent = 'Analyzing...';
-
-        let videoId;
-        try {
-            const url = new URL(videoUrl);
-            videoId = url.searchParams.get('v');
-            if (!videoId) {
-                throw new Error('Invalid YouTube URL');
-            }
-        } catch (e) {
-            alert('Please enter a valid YouTube URL');
-            return;
-        }
-        
-        document.getElementById('video-container').innerHTML = `
-            <iframe width="100%" height="315" 
-                    src="https://www.youtube.com/embed/${videoId}" 
-                    frameborder="0" 
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-                    allowfullscreen></iframe>
-        `;
-        
-        const response = await fetch('/analyze/', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': getCookie('csrftoken')
-            },
-            body: JSON.stringify({ video_url: videoUrl })
-        });
-        
+    if (!response.ok) {
         const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'Error analyzing video');
-        }
-        
-        updateResults(data.results);
-    } catch (error) {
-        console.error('Error:', error);
-        alert(error.message || 'An error occurred while analyzing the video');
-    } finally {
-        button.disabled = false;
-        spinner.classList.add('d-none');
-        analyzeText.textContent = 'Analyze Comments';
+        throw new Error(data.error || 'Error analyzing video');
     }
-});
+    
+    return await response.json();
+}
 
+// Función para actualizar resultados
 function updateResults(results) {
     const resultsContainer = document.getElementById('results-container');
     resultsContainer.innerHTML = '';
     
-    if (results.length === 0) {
+    if (!results || results.length === 0) {
         resultsContainer.innerHTML = '<div class="alert alert-info">No hate comments detected.</div>';
         return;
     }
@@ -142,46 +111,175 @@ function updateResults(results) {
     });
 }
 
-function startMonitoring(videoId) {
-    const eventSource = new EventSource(`/monitor/${videoId}/`);
-    
-    eventSource.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        updateResults(data.results);
-    };
-    
-    eventSource.onerror = function() {
-        eventSource.close();
-    };
+// Función auxiliar para extraer el video ID
+function extractVideoId(url) {
+    try {
+        const urlObj = new URL(url);
+        if (urlObj.hostname.includes('youtube.com')) {
+            return urlObj.searchParams.get('v') || '';
+        } else if (urlObj.hostname.includes('youtu.be')) {
+            return urlObj.pathname.substring(1);
+        }
+        return '';
+    } catch (e) {
+        console.error('Error parsing URL:', e);
+        return '';
+    }
 }
 
-async function manageTask(videoId, action) {
+// Event Listeners
+document.addEventListener('DOMContentLoaded', function() {
+    const analyzeBtn = document.getElementById('analyze-btn');
+    const startButton = document.getElementById('start-analysis');
+    const stopButton = document.getElementById('stop-analysis');
+    
+    if (analyzeBtn) {
+        analyzeBtn.addEventListener('click', async () => {
+            const button = analyzeBtn;
+            const spinner = document.getElementById('loading-spinner');
+            const analyzeText = document.getElementById('analyze-text');
+            const videoUrl = document.getElementById('video-url').value;
+            
+            if (!videoUrl) {
+                alert('Please enter a valid YouTube URL');
+                return;
+            }
+
+            try {
+                button.disabled = true;
+                spinner.classList.remove('d-none');
+                analyzeText.textContent = 'Analyzing...';
+
+                const videoId = extractVideoId(videoUrl);
+                if (!videoId) {
+                    throw new Error('Invalid YouTube URL');
+                }
+                
+                updateVideoContainer(videoId);
+                const data = await analyzeVideo(videoUrl);
+                updateResults(data.results);
+
+            } catch (error) {
+                console.error('Error:', error);
+                alert(error.message || 'An error occurred while analyzing the video');
+            } finally {
+                button.disabled = false;
+                spinner.classList.add('d-none');
+                analyzeText.textContent = 'Analyze Comments';
+            }
+        });
+    }
+    
+    if (startButton) {
+        startButton.addEventListener('click', startMonitoring);
+    }
+    
+    if (stopButton) {
+        stopButton.addEventListener('click', stopMonitoring);
+    }
+});
+
+// Funciones para el monitoreo en tiempo real
+async function startMonitoring() {
+    const startButton = document.getElementById('start-analysis');
+    const stopButton = document.getElementById('stop-analysis');
+    const videoUrl = document.getElementById('video-url').value;
+    
+    const videoId = extractVideoId(videoUrl);
+    if (!videoId) {
+        alert('Please enter a valid YouTube URL');
+        return;
+    }
+
     try {
-        const response = await fetch('/manage-task/', {
+        startButton.disabled = true;
+        
+        const response = await fetch('/start-monitoring/', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRFToken': getCookie('csrftoken')
             },
-            body: JSON.stringify({ video_id: videoId, action: action })
+            body: JSON.stringify({ video_id: videoId })
         });
 
-        const data = await response.json();
         if (!response.ok) {
-            throw new Error(data.error || 'Error managing task');
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to start monitoring');
+        }
+
+        const data = await response.json();
+        window.currentTaskId = data.task_id;
+        
+        if (window.currentEventSource) {
+            window.currentEventSource.close();
         }
         
-        alert(data.status);
+        window.currentEventSource = new EventSource(`/monitor/${videoId}/`);
+        window.currentEventSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            updateResults(data.results);
+        };
+
+        startButton.classList.add('d-none');
+        stopButton.classList.remove('d-none');
         
-        if (action === 'start' || action === 'stop') {
-            location.reload();
-        }
     } catch (error) {
-        console.error('Error managing task:', error);
-        alert(error.message || 'An error occurred while managing the task');
+        console.error('Error:', error);
+        alert(error.message || 'An error occurred while starting monitoring');
+    } finally {
+        startButton.disabled = false;
     }
 }
 
+async function stopMonitoring() {
+    const startButton = document.getElementById('start-analysis');
+    const stopButton = document.getElementById('stop-analysis');
+    const videoUrl = document.getElementById('video-url').value;
+    const videoId = extractVideoId(videoUrl);
+
+    if (!videoId || !window.currentTaskId) {
+        alert('No active monitoring session found');
+        return;
+    }
+
+    try {
+        stopButton.disabled = true;
+
+        if (window.currentEventSource) {
+            window.currentEventSource.close();
+        }
+
+        const response = await fetch('/stop-monitoring/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({
+                video_id: videoId,
+                task_id: window.currentTaskId
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to stop monitoring');
+        }
+
+        window.currentTaskId = null;
+        stopButton.classList.add('d-none');
+        startButton.classList.remove('d-none');
+
+    } catch (error) {
+        console.error('Error:', error);
+        alert(error.message || 'An error occurred while stopping monitoring');
+    } finally {
+        stopButton.disabled = false;
+    }
+}
+
+// Función para obtener el token CSRF
 function getCookie(name) {
     let cookieValue = null;
     if (document.cookie && document.cookie !== '') {

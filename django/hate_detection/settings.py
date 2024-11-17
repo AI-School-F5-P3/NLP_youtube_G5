@@ -147,10 +147,14 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'static/media')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-CELERY_BEAT_SCHEDULE = {
-    'analyze-comments-every-5-mins': {
-        'task': 'advanced.tasks.analyze_comments_periodically',
-        'schedule': crontab(minute='*/5'),  # Cada 5 minutos
-        'args': ('<video_id>',),  # Reemplaza <video_id> por un valor dinámico en la práctica
-    },
-}
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+
+# Para establecer el intervalo de reconexión a 10 segundos
+BROKER_CONNECTION_RETRY_ON_STARTUP = True
+BROKER_CONNECTION_RETRY = True
+BROKER_CONNECTION_MAX_RETRIES = None
+BROKER_CONNECTION_RETRY_DELAY = 10  # segundos

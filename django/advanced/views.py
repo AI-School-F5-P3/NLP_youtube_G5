@@ -12,11 +12,14 @@ import logging
 from advanced.train_model import train_model
 from .tasks import analyze_comments_periodically
 from celery import current_app
+from celery.result import AsyncResult
 from django.db import IntegrityError
 import joblib
 import os
 from dotenv import load_dotenv
 from urllib.parse import urlparse, parse_qs
+from django.http import StreamingHttpResponse
+import time
 
 # Configurar logger
 logger = logging.getLogger(__name__)
@@ -78,10 +81,10 @@ class VideoAnalysisView(View):
                 'error': 'Error saving video information'
             }, status=500)
         
-        # Obtener comentarios
+        # Obtener comentarios nuevos de YouTube
         try:
-            comments = get_youtube_comments(video_id)
-            if not comments:
+            youtube_comments = get_youtube_comments(video_id)
+            if not youtube_comments:
                 return JsonResponse({
                     'error': 'No comments found or error fetching comments'
                 }, status=404)
@@ -92,51 +95,50 @@ class VideoAnalysisView(View):
             }, status=500)
         
         results = []
-        processed_comment_ids = set()
         
-        # Primero, obtener comentarios existentes
-        existing_comments = Comment.objects.filter(
-            video=video,
-            is_toxic=True
-        ).values('comment_id', 'text', 'is_toxic', 'probability')
-        
-        for comment in existing_comments:
-            results.append({
-                'comment_id': comment['comment_id'],
-                'text': comment['text'],
-                'is_toxic': comment['is_toxic'],
-                'probability': comment['probability']
-            })
-            processed_comment_ids.add(comment['comment_id'])
-            
-        # Procesar nuevos comentarios
-        for comment in comments:
-            if not comment.get('text') or comment['id'] in processed_comment_ids:
+        # Procesar TODOS los comentarios nuevos de YouTube
+        for comment in youtube_comments:
+            if not comment.get('text'):
                 continue
 
             try:
                 analysis_result = self.model.predict(comment['text'])
-                if analysis_result['is_toxic']:  # Solo procesar si es tóxico
-                    try:
-                        Comment.objects.create(
-                            video=video,
-                            comment_id=comment['id'],
-                            text=comment['text'],
-                            is_toxic=analysis_result['is_toxic'],
-                            probability=analysis_result['probability']
-                        )
-                        results.append({
-                            'comment_id': comment['id'],
-                            'text': comment['text'],
-                            'is_toxic': analysis_result['is_toxic'],
-                            'probability': analysis_result['probability']
-                        })
-                    except IntegrityError:
-                        logger.info(f"Comment {comment['id']} already exists in the database.")
+                
+                # Guardar o actualizar el comentario
+                Comment.objects.update_or_create(
+                    video=video,
+                    comment_id=comment['id'],
+                    defaults={
+                        'text': comment['text'],
+                        'is_toxic': analysis_result['is_toxic'],
+                        'probability': analysis_result['probability']
+                    }
+                )
+                
+                # Agregar a results solo si es tóxico
+                if analysis_result['is_toxic']:
+                    results.append({
+                        'comment_id': comment['id'],
+                        'text': comment['text'],
+                        'is_toxic': analysis_result['is_toxic'],
+                        'probability': analysis_result['probability']
+                    })
+                    
             except Exception as e:
                 logger.error(f"Error processing comment {comment['id']}: {str(e)}")
 
-        return JsonResponse({'video_id': video_id, 'results': results})
+        # Si no se encontraron comentarios tóxicos
+        if not results:
+            return JsonResponse({
+                'video_id': video_id,
+                'results': [],
+                'message': 'No hate comments detected.'
+            })
+
+        return JsonResponse({
+            'video_id': video_id,
+            'results': results
+        })
 
     def extract_video_id(self, url):
         """Extrae el video_id de una URL de YouTube de manera más robusta"""
@@ -213,3 +215,85 @@ class VideoManagementView(View):
             return JsonResponse({'status': f'Task stopped for video {video_id}'}, status=200)
 
         return JsonResponse({'error': 'Invalid action'}, status=400)
+    
+@method_decorator(csrf_exempt, name='dispatch')
+class CeleryStatusView(View):
+    def get(self, request):
+        try:
+            # Intenta hacer una tarea simple para verificar si Celery está funcionando
+            result = analyze_comments_periodically.apply_async(args=['test'], countdown=1)
+            return JsonResponse({'status': 'ok'})
+        except Exception as e:
+            return JsonResponse({'status': 'error', 'message': str(e)}, status=503)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class StartMonitoringView(View):
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+            video_id = data.get('video_id')
+            
+            if not video_id:
+                return JsonResponse({'error': 'Video ID is required'}, status=400)
+            
+            # Iniciar tarea de Celery
+            task = analyze_comments_periodically.delay(video_id)
+            
+            return JsonResponse({
+                'status': 'success',
+                'task_id': task.id,
+                'message': 'Monitoring started successfully'
+            })
+            
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON data'}, status=400)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class StopMonitoringView(View):
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+            video_id = data.get('video_id')
+            task_id = data.get('task_id')
+            
+            if not video_id:
+                return JsonResponse({'error': 'Video ID is required'}, status=400)
+            if not task_id:
+                return JsonResponse({'error': 'Task ID is required'}, status=400)
+            
+            # Revocar la tarea de Celery
+            AsyncResult(task_id).revoke(terminate=True)
+            
+            return JsonResponse({
+                'status': 'success',
+                'message': 'Monitoring stopped successfully'
+            })
+            
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON data'}, status=400)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+
+class MonitorStreamView(View):
+    def get(self, request, video_id):
+        def event_stream():
+            while True:
+                # Obtener nuevos comentarios tóxicos
+                toxic_comments = Comment.objects.filter(
+                    video__video_id=video_id,
+                    is_toxic=True
+                ).values('text', 'probability')
+                
+                data = {
+                    'results': list(toxic_comments)
+                }
+                
+                yield f"data: {json.dumps(data)}\n\n"
+                time.sleep(10)  # Esperar 10 segundos antes de la siguiente actualización
+                
+        return StreamingHttpResponse(
+            event_stream(),
+            content_type='text/event-stream'
+        )
