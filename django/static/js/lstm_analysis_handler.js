@@ -231,7 +231,7 @@ class LSTMAnalysisHandler {
                         ${(result.probability * 100).toFixed(1)}%
                     </div>
                 `;
-                this.resultsContainer.prepend(commentElement);
+                this.resultsContainer.appendChild(commentElement);
             }
         });
     }

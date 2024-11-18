@@ -97,58 +97,98 @@ class HateSpeechDetector:
         return detector
 
 # Interfaz Streamlit
-def create_streamlit_app(detector, metrics):
-    st.title("Detector de Mensajes de Odio")
+def create_streamlit_app():
+    st.title("Advanced YouTube Hate Speech Detector (LSTM)")
     
-    # Cargar modelo
     try:
-        detector = HateSpeechDetector.load_model('hate_speech_model.pkl')
-    except:
-        st.error("No se encontró un modelo entrenado. Por favor, entrene el modelo primero.")
-        return
-    
-    # Área de texto para input
-    text_input = st.text_area("Introduce el texto a analizar:")
-    
-    if st.button("Analizar"):
-        if text_input:
-            probability = detector.predict(text_input)[0]
-            st.write(f"Probabilidad de contenido de odio: {probability:.2%}")
-            
-            if probability > 0.5:
-                st.error("⚠️ Este texto puede contener mensajes de odio.")
-            else:
-                st.success("✅ Este texto parece seguro.")
+        if os.path.exists('lstm_model.pth'):
+            checkpoint = torch.load('lstm_model.pth')
+            # Usar los parámetros originales para mantener compatibilidad
+            model = ImprovedLSTMModel(1000, 128, 1)  # Volver a hidden_size=128
+            model.load_state_dict(checkpoint['model_state_dict'])
+            vectorizer = checkpoint['vectorizer']
         else:
-            st.warning("Por favor, introduce algún texto para analizar.")
-            
-        st.subheader("Métricas del modelo:")
-        metrics_df = pd.DataFrame({
-            'Métrica': ['Precisión de entrenamiento', 'Precisión de prueba', 'Promedio de validación cruzada', 'Desviación estándar de validación cruzada', 'Overfitting'],
-            'Valor': [
-                f"{metrics['train_accuracy']:.4f}",
-                f"{metrics['test_accuracy']:.4f}",
-                f"{metrics['cv_scores_mean']:.4f}",
-                f"{metrics['cv_scores_std']:.4f}",
-                f"{metrics['overfitting']:.4f}"
-            ]
-        })
-        st.table(metrics_df)
-    else:
-        st.warning("Por favor, introduce algún texto para analizar.")
+            st.info("Training new model... This may take a few minutes.")
+            df = pd.read_csv('youtoxic_english_1000.csv')
+            model, vectorizer, metrics = train_lstm(df)
+            st.success("Model training completed!")
+        
+        # Initialize YouTube scraper
+        scraper = YouTubeCommentScraper()
+
+        # YouTube URL input
+        video_url = st.text_input("Enter YouTube video URL:")
+        
+        if st.button("Analyze Comments"):
+            if video_url:
+                try:
+                    with st.spinner("Analyzing comments..."):
+                        comments = scraper.get_comments(video_url)
+                        
+                        if comments:
+                            results = []
+                            for comment in comments:
+                                probability = analyze_comment(model, vectorizer, comment)
+                                results.append({
+                                    'comment': comment,
+                                    'probability': probability,
+                                    'is_hate': probability > 0.5
+                                })
+                            
+                            # Display results with improved formatting
+                            st.subheader("Analysis Results")
+                            hate_comments = [r for r in results if r['is_hate']]
+                            
+                            # Metrics in columns
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Total Comments", len(comments))
+                            with col2:
+                                st.metric("Hate Comments", len(hate_comments))
+                            with col3:
+                                st.metric("Hate Percentage", 
+                                         f"{(len(hate_comments)/len(comments))*100:.1f}%")
+                            
+                            # Create tabs for different views
+                            tab1, tab2 = st.tabs(["All Comments", "Hate Comments Only"])
+                            
+                            with tab1:
+                                for result in results:
+                                    with st.container():
+                                        if result['is_hate']:
+                                            st.error(
+                                                f"⚠️ Probability: {result['probability']:.2%}\n"
+                                                f"Comment: {result['comment']}"
+                                            )
+                                        else:
+                                            st.success(
+                                                f"✅ Probability: {result['probability']:.2%}\n"
+                                                f"Comment: {result['comment']}"
+                                            )
+                            
+                            with tab2:
+                                if hate_comments:
+                                    for result in hate_comments:
+                                        st.error(
+                                            f"⚠️ Probability: {result['probability']:.2%}\n"
+                                            f"Comment: {result['comment']}"
+                                        )
+                                else:
+                                    st.success("No hate comments found! 🎉")
+                        else:
+                            st.warning("No comments found in the video.")
+                except Exception as e:
+                    st.error(f"Error analyzing video: {str(e)}")
+            else:
+                st.warning("Please enter a YouTube URL.")
+
+        # Show model metrics if available
+        if os.path.exists('model_metrics.json'):
+            metrics = pd.read_json('model_metrics.json').iloc[0].to_dict()
+            display_metrics(metrics)
+
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
 
 if __name__ == "__main__":
-    # Cargar y entrenar el modelo
-    df = pd.read_csv('youtoxic_english_1000.csv')
-    detector = HateSpeechDetector()
-    metrics = detector.train(df)
-    print("Métricas del modelo:")
-    for key, value in metrics.items():
-        print(f"{key}: {value}")
-    print(f"Classification Report:\n{metrics['classification_report']}")
-    
-    # Guardar el modelo
-    detector.save_model('hate_speech_model.pkl')
-    
-    # Ejecutar la app
-    create_streamlit_app(detector, metrics)
+    create_streamlit_app()

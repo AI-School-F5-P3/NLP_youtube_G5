@@ -1,117 +1,357 @@
-import pandas as pd
+import streamlit as st
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-from transformers import BertTokenizer, BertModel
+from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+from torch.utils.data import DataLoader, Dataset
+from sklearn.feature_extraction.text import TfidfVectorizer
+from googleapiclient.discovery import build
+import re
+import os
+from dotenv import load_dotenv
+import seaborn as sns
+import matplotlib.pyplot as plt
+from urllib.parse import urlparse, parse_qs
 
-# Cargar los datos
-try:
-    data = pd.read_csv('youtoxic_english_1000.csv')
-    print("Datos cargados correctamente.")
-except Exception as e:
-    print(f"Error al cargar los datos: {e}")
+# Load environment variables
+load_dotenv()
 
-# Crear la columna combinada `IsHateSpeech`
-hate_columns = [
-    "IsToxic", "IsAbusive", "IsThreat", "IsProvocative", "IsObscene", 
-    "IsHatespeech", "IsRacist", "IsNationalist", "IsSexist", 
-    "IsHomophobic", "IsReligiousHate", "IsRadicalism"
-]
-data['IsHateSpeech'] = data[hate_columns].any(axis=1)
-
-# Definir textos y etiquetas combinadas
-texts = data["Text"]
-labels = data["IsHateSpeech"].astype(int)  # Convierte a 0 y 1 para el modelo
-
-# Codificar etiquetas
-label_encoder = LabelEncoder()
-y = label_encoder.fit_transform(labels)
-
-# Definir el dataset personalizado
-class CommentDataset(Dataset):
-    def __init__(self, texts, labels, tokenizer, max_length):
-        self.texts = texts
-        self.labels = labels
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-
+class TextDataset(Dataset):
+    def __init__(self, X, y):
+        if isinstance(X, pd.Series):
+            X = X.to_numpy()
+        if isinstance(y, pd.Series):
+            y = y.to_numpy()
+            
+        if len(X.shape) == 1:
+            X = X.reshape(-1, 1)
+            
+        self.X = torch.FloatTensor(X)
+        self.y = torch.FloatTensor(y)
+    
     def __len__(self):
-        return len(self.texts)
-
+        return len(self.X)
+    
     def __getitem__(self, idx):
-        text = self.texts[idx]
-        label = self.labels[idx]
-        encoding = self.tokenizer.encode_plus(
-            text,
-            max_length=self.max_length,
-            padding='max_length',
-            truncation=True,
-            return_tensors="pt",
-        )
-        return {
-            'input_ids': encoding['input_ids'].flatten(),
-            'attention_mask': encoding['attention_mask'].flatten(),
-            'label': torch.tensor(label, dtype=torch.long)
+        return self.X[idx], self.y[idx]
+
+class ImprovedLSTMModel(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, num_layers=2):
+        super(ImprovedLSTMModel, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        
+        # Mantener exactamente la misma estructura que el modelo original
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.fc = nn.Linear(hidden_size, output_size)
+    
+    def forward(self, x):
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size)
+        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size)
+        
+        out, _ = self.lstm(x.unsqueeze(1), (h0, c0))
+        out = self.fc(out[:, -1, :])
+        return out
+
+def train_lstm(df):
+    input_size = 1000
+    hidden_size = 256  # Increased from 128
+    output_size = 1
+    batch_size = 32
+    learning_rate = 0.001
+    epochs = 20  # Increased from 15
+
+    try:
+        vectorizer = TfidfVectorizer(max_features=input_size, 
+                                   stop_words='english',
+                                   min_df=2)  # Added min_df parameter
+        X, vectorizer = preprocess_texts(df)
+        y = prepare_target(df)
+
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, 
+                                                           random_state=42, 
+                                                           stratify=y)  # Added stratification
+
+        train_dataset = TextDataset(X_train, y_train)
+        test_dataset = TextDataset(X_test, y_test)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size)
+
+        model = ImprovedLSTMModel(input_size, hidden_size, output_size)
+        criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([2.0]))  # Added class weighting
+        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, 
+                                    weight_decay=0.01)  # Changed to AdamW with weight decay
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', 
+                                                             patience=3, factor=0.5)
+
+        best_val_loss = float('inf')
+        early_stopping_counter = 0
+        early_stopping_patience = 5
+
+        st.write("Training model...")
+        progress_bar = st.progress(0)
+        
+        train_losses = []
+        val_losses = []
+        
+        for epoch in range(epochs):
+            model.train()
+            epoch_loss = 0
+            for batch_idx, (X_batch, y_batch) in enumerate(train_loader):
+                optimizer.zero_grad()
+                outputs = model(X_batch)
+                loss = criterion(outputs, y_batch.view(-1, 1))
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # Added gradient clipping
+                optimizer.step()
+                epoch_loss += loss.item()
+            
+            # Validation phase
+            model.eval()
+            val_loss = 0
+            with torch.no_grad():
+                for X_batch, y_batch in test_loader:
+                    outputs = model(X_batch)
+                    val_loss += criterion(outputs, y_batch.view(-1, 1)).item()
+            
+            train_losses.append(epoch_loss / len(train_loader))
+            val_losses.append(val_loss / len(test_loader))
+            
+            # Learning rate scheduling
+            scheduler.step(val_loss)
+            
+            # Early stopping check
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                early_stopping_counter = 0
+                # Save best model
+                torch.save({
+                    'model_state_dict': model.state_dict(),
+                    'vectorizer': vectorizer
+                }, 'lstm_model.pth')
+            else:
+                early_stopping_counter += 1
+            
+            if early_stopping_counter >= early_stopping_patience:
+                st.info(f"Early stopping triggered at epoch {epoch + 1}")
+                break
+            
+            progress_bar.progress((epoch + 1) / epochs)
+            
+        st.success("Training completed!")
+
+        # Load best model for evaluation
+        checkpoint = torch.load('lstm_model.pth')
+        model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Evaluate model
+        model.eval()
+        y_train_pred = []
+        y_test_pred = []
+        y_test_prob = []
+        
+        with torch.no_grad():
+            for X_batch, _ in train_loader:
+                outputs = torch.sigmoid(model(X_batch))
+                y_train_pred.extend((outputs > 0.5).numpy())
+            
+            for X_batch, _ in test_loader:
+                outputs = torch.sigmoid(model(X_batch))
+                y_test_prob.extend(outputs.numpy())
+                y_test_pred.extend((outputs > 0.5).numpy())
+
+        # Calculate metrics
+        train_accuracy = accuracy_score(y_train, y_train_pred)
+        test_accuracy = accuracy_score(y_test, y_test_pred)
+        class_report = classification_report(y_test, y_test_pred, output_dict=True)
+        conf_matrix = confusion_matrix(y_test, y_test_pred)
+        
+        # Create visualization for confusion matrix
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues',
+                    xticklabels=['Non-Hate', 'Hate'],
+                    yticklabels=['Non-Hate', 'Hate'])
+        plt.title('Confusion Matrix')
+        
+        metrics = {
+            'train_accuracy': train_accuracy,
+            'test_accuracy': test_accuracy,
+            'classification_report': class_report,
+            'confusion_matrix': conf_matrix,
+            'learning_curves': {
+                'train_losses': train_losses,
+                'val_losses': val_losses
+            }
         }
 
-# Crear el modelo
-class HateSpeechClassifier(nn.Module):
-    def __init__(self, n_classes):
-        super(HateSpeechClassifier, self).__init__()
-        self.bert = BertModel.from_pretrained('bert-base-uncased')
-        self.drop = nn.Dropout(p=0.3)
-        self.out = nn.Linear(self.bert.config.hidden_size, n_classes)
-
-    def forward(self, input_ids, attention_mask):
-        outputs = self.bert(
-            input_ids=input_ids,
-            attention_mask=attention_mask
-        )
-        pooled_output = outputs.pooler_output  # pooler_output es un tensor
-        output = self.drop(pooled_output)
-        return self.out(output)
-
-# Tokenizador y parámetros del modelo
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-model = HateSpeechClassifier(n_classes=len(label_encoder.classes_))  # Usa el número de clases correcto
-
-# Configura el dispositivo en CPU para evitar problemas de GPU
-device = torch.device("cpu")
-model = model.to(device)
-print("Modelo cargado y enviado al dispositivo.")
-
-# Dividir los datos y preparar DataLoaders
-X_train, X_val, y_train, y_val = train_test_split(texts, y, test_size=0.2, random_state=42)
-train_dataset = CommentDataset(X_train.tolist(), y_train, tokenizer, max_length=160)
-train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
-print("Datos de entrenamiento preparados.")
-
-# Optimización y función de pérdida
-optimizer = optim.Adam(model.parameters(), lr=2e-5)
-loss_fn = nn.CrossEntropyLoss().to(device)
-
-# Entrenamiento básico
-for epoch in range(3):  # Ajusta los epochs según sea necesario
-    model.train()
-    print(f"Epoch {epoch+1} comenzando...")
-    for i, batch in enumerate(train_loader):
-        input_ids = batch['input_ids'].to(device)
-        attention_mask = batch['attention_mask'].to(device)
-        labels = batch['label'].to(device)
+        # Save metrics
+        pd.DataFrame([metrics]).to_json('model_metrics.json')
         
-        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-        loss = loss_fn(outputs, labels)
-        
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        
-        if i % 10 == 0:  # Imprime cada 10 iteraciones para seguimiento
-            print(f"Batch {i}, Loss: {loss.item()}")
+        return model, vectorizer, metrics
     
-    print(f"Epoch {epoch+1} completado. Última pérdida: {loss.item()}")
+    except Exception as e:
+        st.error(f"Error in training: {str(e)}")
+        raise e
 
-print("Entrenamiento completado.")
+class YouTubeCommentScraper:
+    def __init__(self):
+        # Asegúrate de tener tu API_KEY en el archivo .env
+        self.api_key = os.getenv('YOUTUBE_API_KEY')
+        if not self.api_key:
+            raise ValueError("YouTube API key not found in environment variables")
+        self.youtube = build('youtube', 'v3', developerKey=self.api_key)
+
+    def extract_video_id(self, url):
+        """Extrae el ID del video de una URL de YouTube."""
+        # Maneja diferentes formatos de URL de YouTube
+        parsed_url = urlparse(url)
+        if parsed_url.hostname in ['www.youtube.com', 'youtube.com']:
+            if parsed_url.path == '/watch':
+                return parse_qs(parsed_url.query)['v'][0]
+            elif parsed_url.path.startswith(('/embed/', '/v/')):
+                return parsed_url.path.split('/')[2]
+        elif parsed_url.hostname == 'youtu.be':
+            return parsed_url.path[1:]
+        raise ValueError("Invalid YouTube URL")
+
+    def get_comments(self, video_url, max_comments=100):
+        """Obtiene los comentarios de un video de YouTube."""
+        try:
+            video_id = self.extract_video_id(video_url)
+            comments = []
+            
+            request = self.youtube.commentThreads().list(
+                part="snippet",
+                videoId=video_id,
+                textFormat="plainText",
+                maxResults=min(max_comments, 100)
+            )
+
+            while request and len(comments) < max_comments:
+                response = request.execute()
+                
+                for item in response['items']:
+                    comment = item['snippet']['topLevelComment']['snippet']['textDisplay']
+                    comments.append(comment)
+                    
+                    if len(comments) >= max_comments:
+                        break
+                
+                # Obtener la siguiente página de comentarios si existe
+                if 'nextPageToken' in response and len(comments) < max_comments:
+                    request = self.youtube.commentThreads().list(
+                        part="snippet",
+                        videoId=video_id,
+                        textFormat="plainText",
+                        maxResults=min(max_comments - len(comments), 100),
+                        pageToken=response['nextPageToken']
+                    )
+                else:
+                    break
+                    
+            return comments
+
+        except Exception as e:
+            raise Exception(f"Error getting YouTube comments: {str(e)}")
+
+def display_metrics(metrics):
+    st.subheader("Model Performance Metrics")
+    
+    # Display main metrics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Training Accuracy", f"{metrics['train_accuracy']:.2%}")
+    with col2:
+        st.metric("Testing Accuracy", f"{metrics['test_accuracy']:.2%}")
+    with col3:
+        overfitting = metrics['train_accuracy'] - metrics['test_accuracy']
+        st.metric("Model Difference", f"{overfitting:.2%}")
+
+def analyze_comment(model, vectorizer, comment):
+    """Analiza un comentario para determinar si es ofensivo."""
+    model.eval()  # Asegúrate de que el modelo esté en modo evaluación
+    with torch.no_grad():
+        # Preprocesar comentario
+        X = vectorizer.transform([comment]).toarray()
+        X_tensor = torch.FloatTensor(X)
+        
+        # Hacer predicción
+        output = model(X_tensor)
+        probability = torch.sigmoid(output).item()  # Convertir salida a probabilidad
+        return probability
+
+def create_streamlit_app():
+    st.title("Advanced YouTube Hate Speech Detector (LSTM)")
+    
+    try:
+        if os.path.exists('lstm_model.pth'):
+            checkpoint = torch.load('lstm_model.pth')
+            model = ImprovedLSTMModel(1000, 128, 1)  # Dimensiones exactas del modelo original
+            model.load_state_dict(checkpoint['model_state_dict'])
+            vectorizer = checkpoint['vectorizer']
+        else:
+            st.info("Training new model... This may take a few minutes.")
+            df = pd.read_csv('youtoxic_english_1000.csv')
+            model, vectorizer, metrics = train_lstm(df)
+            st.success("Model training completed!")
+        
+        # Initialize YouTube scraper
+        scraper = YouTubeCommentScraper()
+
+        # YouTube URL input
+        video_url = st.text_input("Enter YouTube video URL:")
+        
+        if st.button("Analyze Comments"):
+            if video_url:
+                try:
+                    with st.spinner("Analyzing comments..."):
+                        comments = scraper.get_comments(video_url)
+                        
+                        if comments:
+                            results = []
+                            for comment in comments:
+                                probability = analyze_comment(model, vectorizer, comment)
+                                results.append({
+                                    'comment': comment,
+                                    'probability': probability,
+                                    'is_hate': probability > 0.5
+                                })
+                            
+                            # Display results
+                            hate_comments = [r for r in results if r['is_hate']]
+                            st.write(f"Found {len(hate_comments)} potentially offensive comments out of {len(results)} analyzed.")
+                            
+                            for result in results:
+                                if result['is_hate']:
+                                    st.error(f"⚠️ {result['comment']}\nProbability: {result['probability']:.2%}")
+                                else:
+                                    st.success(f"✅ {result['comment']}\nProbability: {result['probability']:.2%}")
+                            
+                            # Summary metrics
+                            st.subheader("Analysis Summary")
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Total Comments", len(comments))
+                            with col2:
+                                st.metric("Hate Comments", len(hate_comments))
+                            with col3:
+                                st.metric("Hate Percentage", f"{(len(hate_comments)/len(comments))*100:.1f}%")
+                        else:
+                            st.warning("No comments found in the video.")
+                except Exception as e:
+                    st.error(f"Error analyzing video: {str(e)}")
+            else:
+                st.warning("Please enter a YouTube URL.")
+
+        # Show model metrics if available
+        if os.path.exists('model_metrics.json'):
+            metrics = pd.read_json('model_metrics.json').iloc[0].to_dict()
+            display_metrics(metrics)
+
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+
+if __name__ == "__main__":
+    create_streamlit_app()
