@@ -16,8 +16,14 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.shortcuts import redirect
+
+def redirect_to_advanced(request):
+    return redirect('advanced:video_analysis')
 
 urlpatterns = [
+    path('', redirect_to_advanced, name='home'),  # Redirige la raíz a Advanced
     path('admin/', admin.site.urls),
-    path('', include('advanced.urls')),
+    path('advanced/', include('advanced.urls', namespace='advanced')),
+    path('expert/', include('expert.urls', namespace='expert')),
 ]

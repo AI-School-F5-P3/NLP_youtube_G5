@@ -86,27 +86,33 @@ async function analyzeVideo(videoUrl) {
 }
 
 // Función para actualizar resultados
-function updateResults(results) {
+function updateResults(results, action = 'replace') {
     const resultsContainer = document.getElementById('results-container');
-    resultsContainer.innerHTML = '';
+    
+    if (action === 'replace') {
+        resultsContainer.innerHTML = '';
+    }
     
     if (!results || results.length === 0) {
-        resultsContainer.innerHTML = '<div class="alert alert-info">No hate comments detected.</div>';
+        if (action === 'replace') {
+            resultsContainer.innerHTML = '<div class="alert alert-info">No hate comments detected.</div>';
+        }
         return;
     }
     
     results.forEach(result => {
         if (result.is_toxic) {
-            resultsContainer.innerHTML += `
-                <div class="alert alert-danger d-flex justify-content-between align-items-center">
-                    <div class="flex-grow-1">
-                        <small>${result.text}</small>
-                    </div>
-                    <div class="badge bg-danger ml-2">
-                        ${(result.probability * 100).toFixed(1)}%
-                    </div>
+            const commentElement = document.createElement('div');
+            commentElement.className = 'alert alert-danger d-flex justify-content-between align-items-center';
+            commentElement.innerHTML = `
+                <div class="flex-grow-1">
+                    <small>${result.text}</small>
+                </div>
+                <div class="badge bg-danger ml-2">
+                    ${(result.probability * 100).toFixed(1)}%
                 </div>
             `;
+            resultsContainer.prepend(commentElement);  // Añadir al principio
         }
     });
 }
@@ -204,21 +210,39 @@ async function startMonitoring() {
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to start monitoring');
+            throw new Error('Failed to start monitoring');
         }
 
         const data = await response.json();
         window.currentTaskId = data.task_id;
         
+        // Cerrar EventSource existente si hay uno
         if (window.currentEventSource) {
             window.currentEventSource.close();
         }
         
+        // Crear nuevo EventSource
         window.currentEventSource = new EventSource(`/monitor/${videoId}/`);
+        
+        // Manejar eventos
         window.currentEventSource.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            updateResults(data.results);
+            try {
+                const data = JSON.parse(event.data);
+                if (data.error) {
+                    console.error('Server error:', data.error);
+                    return;
+                }
+                updateResults(data.results, data.action || 'replace');
+            } catch (error) {
+                console.error('Error processing SSE message:', error);
+            }
+        };
+
+        window.currentEventSource.onerror = function(error) {
+            console.error('SSE Error:', error);
+            if (window.currentEventSource) {
+                window.currentEventSource.close();
+            }
         };
 
         startButton.classList.add('d-none');

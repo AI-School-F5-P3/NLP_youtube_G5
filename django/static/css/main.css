@@ -244,3 +244,16 @@ body {
     margin-left: 0.5rem;
     vertical-align: middle;
 }
+
+.nav-spacing .nav-item {
+    margin-left: 25px;
+}
+
+.youtube-logo {
+    margin-right: 8px;
+}
+
+.navbar-brand {
+    display: flex;
+    align-items: center;
+}

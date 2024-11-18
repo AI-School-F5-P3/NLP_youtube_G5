@@ -279,21 +279,38 @@ class StopMonitoringView(View):
 class MonitorStreamView(View):
     def get(self, request, video_id):
         def event_stream():
+            last_update = None
             while True:
-                # Obtener nuevos comentarios tóxicos
-                toxic_comments = Comment.objects.filter(
-                    video__video_id=video_id,
-                    is_toxic=True
-                ).values('text', 'probability')
-                
-                data = {
-                    'results': list(toxic_comments)
-                }
-                
-                yield f"data: {json.dumps(data)}\n\n"
-                time.sleep(10)  # Esperar 10 segundos antes de la siguiente actualización
-                
-        return StreamingHttpResponse(
+                try:
+                    # Obtener comentarios tóxicos, incluyendo los anteriores
+                    toxic_comments = Comment.objects.filter(
+                        video__video_id=video_id,
+                        is_toxic=True
+                    ).order_by('-created_at')
+                    
+                    if last_update:
+                        # Solo enviar comentarios nuevos
+                        toxic_comments = toxic_comments.filter(created_at__gt=last_update)
+                    
+                    if toxic_comments.exists():
+                        last_update = toxic_comments.first().created_at
+                        data = {
+                            'results': list(toxic_comments.values('text', 'probability', 'created_at')),
+                            'action': 'append'
+                        }
+                        yield f"data: {json.dumps(data)}\n\n"
+                    
+                    time.sleep(10)  # Esperar 10 segundos antes de la siguiente actualización
+                except Exception as e:
+                    print(f"Error in event stream: {e}")
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    break
+                    
+        response = StreamingHttpResponse(
             event_stream(),
             content_type='text/event-stream'
         )
+        # Agregar headers necesarios para SSE
+        response['Cache-Control'] = 'no-cache'
+        response['X-Accel-Buffering'] = 'no'
+        return response
