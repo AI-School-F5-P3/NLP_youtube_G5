@@ -1,11 +1,11 @@
-// video-analysis-handler.js
+// static/js/lstm_analysis_handler.js
 
-class VideoAnalysisHandler {
+class LSTMAnalysisHandler {
     constructor() {
         this.currentEventSource = null;
         this.currentTaskId = null;
         this.csrfToken = this.getCookie('csrftoken');
-        this.modelType = 'bert';
+        this.modelType = 'lstm';
         
         // DOM Elements
         this.videoUrlInput = document.getElementById('video-url');
@@ -17,7 +17,6 @@ class VideoAnalysisHandler {
         this.resultsContainer = document.getElementById('results-container');
         this.videoContainer = document.getElementById('video-container');
         
-        // Bind event listeners
         this.initializeEventListeners();
     }
 
@@ -64,7 +63,7 @@ class VideoAnalysisHandler {
     }
 
     async analyzeVideo(videoUrl) {
-        const response = await fetch('/advanced/analyze/', {
+        const response = await fetch('/advanced/analyze-lstm/', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -73,7 +72,7 @@ class VideoAnalysisHandler {
             body: JSON.stringify({ 
                 video_url: videoUrl,
                 model_type: this.modelType
-             })
+            })
         });
         
         if (!response.ok) {
@@ -96,7 +95,7 @@ class VideoAnalysisHandler {
         try {
             this.startButton.disabled = true;
             
-            const response = await fetch('/advanced/start-monitoring/', {
+            const response = await fetch('/advanced/start-monitoring-lstm/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -105,7 +104,7 @@ class VideoAnalysisHandler {
                 body: JSON.stringify({ 
                     video_id: videoId,
                     model_type: this.modelType
-                 })
+                })
             });
 
             if (!response.ok) {
@@ -293,5 +292,5 @@ class VideoAnalysisHandler {
 
 // Initialize handler when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    window.videoAnalysisHandler = new VideoAnalysisHandler();
+    window.lstmAnalysisHandler = new LSTMAnalysisHandler();
 });

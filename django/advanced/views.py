@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from urllib.parse import urlparse, parse_qs
 from django.http import StreamingHttpResponse
 import time
+from django.views.generic import TemplateView
 
 # Configurar logger
 logger = logging.getLogger(__name__)
@@ -314,3 +315,209 @@ class MonitorStreamView(View):
         response['Cache-Control'] = 'no-cache'
         response['X-Accel-Buffering'] = 'no'
         return response
+    
+@method_decorator(csrf_exempt, name='dispatch')
+class LSTMVideoAnalysisView(View):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        try:
+            # Importar el predictor LSTM
+            from .ml_lstm_model import get_lstm_predictor
+            self.model = get_lstm_predictor()
+        except Exception as e:
+            logger.error(f"Error initializing LSTM Predictor: {str(e)}")
+            self.model = None
+    
+    def get(self, request):
+        return render(request, 'advanced/lstm.html')
+    
+    def post(self, request):
+        if self.model is None:
+            return JsonResponse({
+                'error': 'LSTM Model not initialized. Please check server logs.'
+            }, status=500)
+
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({
+                'error': 'Invalid JSON in request body'
+            }, status=400)
+        
+        video_url = data.get('video_url')
+        if not video_url:
+            return JsonResponse({
+                'error': 'video_url is required'
+            }, status=400)
+        
+        video_id = self.extract_video_id(video_url)
+        if not video_id:
+            return JsonResponse({
+                'error': 'Invalid YouTube URL format'
+            }, status=400)
+            
+        try:
+            video, created = Video.objects.get_or_create(
+                video_id=video_id,
+                defaults={'url': video_url}
+            )
+        except Exception as e:
+            logger.error(f"Error saving video: {str(e)}")
+            return JsonResponse({
+                'error': 'Error saving video information'
+            }, status=500)
+        
+        try:
+            youtube_comments = get_youtube_comments(video_id)
+            if not youtube_comments:
+                return JsonResponse({
+                    'error': 'No comments found or error fetching comments'
+                }, status=404)
+        except Exception as e:
+            logger.error(f"Error fetching comments: {str(e)}")
+            return JsonResponse({
+                'error': 'Error fetching video comments'
+            }, status=500)
+        
+        results = []
+        
+        for comment in youtube_comments:
+            if not comment.get('text'):
+                continue
+
+            try:
+                # Usar el nuevo método predict
+                analysis_result = self.model.predict(comment['text'])
+                
+                Comment.objects.update_or_create(
+                    video=video,
+                    comment_id=comment['id'],
+                    defaults={
+                        'text': comment['text'],
+                        'is_toxic': analysis_result['is_toxic'],
+                        'probability': analysis_result['probability'],
+                        'model_type': 'lstm'
+                    }
+                )
+                
+                if analysis_result['is_toxic']:
+                    results.append({
+                        'comment_id': comment['id'],
+                        'text': comment['text'],
+                        'is_toxic': analysis_result['is_toxic'],
+                        'probability': analysis_result['probability']
+                    })
+                    
+            except Exception as e:
+                logger.error(f"Error processing comment {comment['id']}: {str(e)}")
+
+        if not results:
+            return JsonResponse({
+                'video_id': video_id,
+                'results': [],
+                'message': 'No hate comments detected.'
+            })
+
+        return JsonResponse({
+            'video_id': video_id,
+            'results': results
+        })
+
+    def extract_video_id(self, url):
+        parsed_url = urlparse(url)
+        if 'youtube' in parsed_url.netloc:
+            return parse_qs(parsed_url.query).get('v', [None])[0]
+        elif 'youtu.be' in parsed_url.netloc:
+            return parsed_url.path.lstrip('/')
+        return None
+
+@method_decorator(csrf_exempt, name='dispatch')
+class LSTMStartMonitoringView(View):
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+            video_id = data.get('video_id')
+            
+            if not video_id:
+                return JsonResponse({'error': 'Video ID is required'}, status=400)
+            
+            task = analyze_comments_periodically.delay(video_id, model_type='lstm')
+            
+            return JsonResponse({
+                'status': 'success',
+                'task_id': task.id,
+                'message': 'LSTM Monitoring started successfully'
+            })
+            
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON data'}, status=400)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class LSTMStopMonitoringView(View):
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+            video_id = data.get('video_id')
+            task_id = data.get('task_id')
+            
+            if not video_id:
+                return JsonResponse({'error': 'Video ID is required'}, status=400)
+            if not task_id:
+                return JsonResponse({'error': 'Task ID is required'}, status=400)
+            
+            AsyncResult(task_id).revoke(terminate=True)
+            
+            return JsonResponse({
+                'status': 'success',
+                'message': 'LSTM Monitoring stopped successfully'
+            })
+            
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON data'}, status=400)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+        
+class MetricsView(TemplateView):
+    template_name = 'advanced/metrics.html'
+
+    def get_metrics_for_model(self, model_type):
+        # Obtener todos los comentarios analizados por este modelo
+        comments = Comment.objects.filter(model_type=model_type)
+        
+        if not comments.exists():
+            return {
+                'accuracy': 0,
+                'precision': 0,
+                'recall': 0,
+                'f1_score': 0
+            }
+
+        # Calcular métricas promedio
+        metrics = {
+            'accuracy': comments.aggregate(Avg('toxicity_probability'))['toxicity_probability__avg'] or 0,
+            'precision': comments.filter(is_toxic=True).aggregate(Avg('toxicity_probability'))['toxicity_probability__avg'] or 0,
+            'recall': comments.filter(is_toxic=True).count() / comments.count() * 100 if comments.count() > 0 else 0,
+        }
+        
+        # Calcular F1 Score
+        if metrics['precision'] + metrics['recall'] > 0:
+            metrics['f1_score'] = 2 * (metrics['precision'] * metrics['recall']) / (metrics['precision'] + metrics['recall'])
+        else:
+            metrics['f1_score'] = 0
+
+        # Redondear valores
+        for key in metrics:
+            metrics[key] = round(metrics[key], 2)
+
+        return metrics
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        
+        # Obtener métricas para cada modelo
+        context['bert_metrics'] = self.get_metrics_for_model('bert')
+        context['lstm_metrics'] = self.get_metrics_for_model('lstm')
+        
+        return context

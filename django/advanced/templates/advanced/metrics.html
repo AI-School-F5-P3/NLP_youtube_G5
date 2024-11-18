@@ -5,16 +5,17 @@
 
 {% block content %}
 <div class="row">
-    <div class="col-12">
+    <!-- BERT Metrics -->
+    <div class="col-12 mb-4">
         <div class="card">
             <div class="card-body">
-                <h5 class="card-title">Model Performance Metrics</h5>
+                <h5 class="card-title">BERT Model Performance Metrics</h5>
                 <div class="row mt-4">
                     <div class="col-md-3 mb-3">
                         <div class="metric-card accuracy">
                             <div class="metric-content">
                                 <h6>Accuracy</h6>
-                                <div class="metric-value">{{ metrics.accuracy }}%</div>
+                                <div class="metric-value">{{ bert_metrics.accuracy }}%</div>
                             </div>
                         </div>
                     </div>
@@ -22,7 +23,7 @@
                         <div class="metric-card precision">
                             <div class="metric-content">
                                 <h6>Precision</h6>
-                                <div class="metric-value">{{ metrics.precision }}%</div>
+                                <div class="metric-value">{{ bert_metrics.precision }}%</div>
                             </div>
                         </div>
                     </div>
@@ -30,7 +31,7 @@
                         <div class="metric-card recall">
                             <div class="metric-content">
                                 <h6>Recall</h6>
-                                <div class="metric-value">{{ metrics.recall }}%</div>
+                                <div class="metric-value">{{ bert_metrics.recall }}%</div>
                             </div>
                         </div>
                     </div>
@@ -38,7 +39,50 @@
                         <div class="metric-card f1">
                             <div class="metric-content">
                                 <h6>F1 Score</h6>
-                                <div class="metric-value">{{ metrics.f1_score }}%</div>
+                                <div class="metric-value">{{ bert_metrics.f1_score }}%</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LSTM Metrics -->
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">LSTM Model Performance Metrics</h5>
+                <div class="row mt-4">
+                    <div class="col-md-3 mb-3">
+                        <div class="metric-card accuracy lstm">
+                            <div class="metric-content">
+                                <h6>Accuracy</h6>
+                                <div class="metric-value">{{ lstm_metrics.accuracy }}%</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="metric-card precision lstm">
+                            <div class="metric-content">
+                                <h6>Precision</h6>
+                                <div class="metric-value">{{ lstm_metrics.precision }}%</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="metric-card recall lstm">
+                            <div class="metric-content">
+                                <h6>Recall</h6>
+                                <div class="metric-value">{{ lstm_metrics.recall }}%</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="metric-card f1 lstm">
+                            <div class="metric-content">
+                                <h6>F1 Score</h6>
+                                <div class="metric-value">{{ lstm_metrics.f1_score }}%</div>
                             </div>
                         </div>
                     </div>
@@ -47,4 +91,30 @@
         </div>
     </div>
 </div>
+
+<style>
+.metric-card {
+    padding: 1.5rem;
+    border-radius: 10px;
+    text-align: center;
+    background: #f8f9fa;
+}
+
+.metric-card.accuracy { border-left: 4px solid #28a745; }
+.metric-card.precision { border-left: 4px solid #007bff; }
+.metric-card.recall { border-left: 4px solid #ffc107; }
+.metric-card.f1 { border-left: 4px solid #dc3545; }
+
+/* Estilos específicos para LSTM */
+.metric-card.lstm.accuracy { border-left: 4px solid #198754; }
+.metric-card.lstm.precision { border-left: 4px solid #0d6efd; }
+.metric-card.lstm.recall { border-left: 4px solid #ffc720; }
+.metric-card.lstm.f1 { border-left: 4px solid #bb2d3b; }
+
+.metric-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    margin-top: 0.5rem;
+}
+</style>
 {% endblock %}
