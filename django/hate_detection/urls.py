@@ -25,5 +25,4 @@ urlpatterns = [
     path('', redirect_to_advanced, name='home'),  # Redirige la raíz a Advanced
     path('admin/', admin.site.urls),
     path('advanced/', include('advanced.urls', namespace='advanced')),
-    path('expert/', include('expert.urls', namespace='expert')),
 ]

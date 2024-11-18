@@ -6,7 +6,7 @@ app_name = 'advanced'
     
 urlpatterns = [
     path('', VideoAnalysisView.as_view(), name='video_analysis'),  # Usar la clase directamente aquí
-    path('analyze/', VideoAnalysisView.as_view(), name='analyze_video'),  # Solo una ruta para análisis
+    path('analyze/', views.VideoAnalysisView.as_view(), name='analyze'),  # Solo una ruta para análisis
     path('metrics/', metrics_view, name='metrics'),
     path('about/', about_view, name='about'),
     path('start-monitoring/', views.StartMonitoringView.as_view(), name='start_monitoring'),
