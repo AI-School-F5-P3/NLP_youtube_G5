@@ -10,9 +10,6 @@ from sklearn.metrics import classification_report
 import streamlit as st
 import joblib
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-import requests
-from bs4 import BeautifulSoup
 import re
 import googleapiclient.discovery
 import os
@@ -73,7 +70,6 @@ class HateSpeechDetector:
                 max_df=0.95,
                 stop_words='english'
             )),
-            ('scaler', StandardScaler(with_mean=False)),
             ('ensemble', VotingClassifier(
                 estimators=[
                     ('lr', clf1),
