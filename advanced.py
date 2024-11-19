@@ -18,6 +18,24 @@ from urllib.parse import urlparse, parse_qs
 # Load environment variables
 load_dotenv()
 
+def preprocess_texts(df):
+    """Preprocess texts using TF-IDF vectorization."""
+    # Prepare hate speech target 
+    hate_columns = ['IsToxic', 'IsAbusive', 'IsThreat', 'IsProvocative', 
+                    'IsObscene', 'IsHatespeech', 'IsRacist', 'IsNationalist', 
+                    'IsSexist', 'IsReligiousHate']
+    
+    # Combine hate columns and convert to binary
+    df['hate_label'] = (df[hate_columns].sum(axis=1) > 0).astype(int)
+    
+    # Vectorize text
+    vectorizer = TfidfVectorizer(max_features=1000, 
+                                 stop_words='english', 
+                                 min_df=2)
+    X = vectorizer.fit_transform(df['Text']).toarray()
+    
+    return X, vectorizer
+
 class TextDataset(Dataset):
     def __init__(self, X, y):
         if isinstance(X, pd.Series):
@@ -43,7 +61,6 @@ class ImprovedLSTMModel(nn.Module):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         
-        # Mantener exactamente la misma estructura que el modelo original
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_size, output_size)
     
@@ -57,22 +74,23 @@ class ImprovedLSTMModel(nn.Module):
 
 def train_lstm(df):
     input_size = 1000
-    hidden_size = 256  # Increased from 128
+    hidden_size = 256
     output_size = 1
     batch_size = 32
     learning_rate = 0.001
-    epochs = 20  # Increased from 15
+    epochs = 20
 
     try:
-        vectorizer = TfidfVectorizer(max_features=input_size, 
-                                   stop_words='english',
-                                   min_df=2)  # Added min_df parameter
+        # Ensure models directory exists
+        os.makedirs('models', exist_ok=True)
+
+        # Preprocess and vectorize texts
         X, vectorizer = preprocess_texts(df)
-        y = prepare_target(df)
+        y = df['hate_label'].values
 
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, 
-                                                           random_state=42, 
-                                                           stratify=y)  # Added stratification
+                                                            random_state=42, 
+                                                            stratify=y)
 
         train_dataset = TextDataset(X_train, y_train)
         test_dataset = TextDataset(X_test, y_test)
@@ -80,11 +98,11 @@ def train_lstm(df):
         test_loader = DataLoader(test_dataset, batch_size=batch_size)
 
         model = ImprovedLSTMModel(input_size, hidden_size, output_size)
-        criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([2.0]))  # Added class weighting
+        criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([2.0]))
         optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, 
-                                    weight_decay=0.01)  # Changed to AdamW with weight decay
+                                      weight_decay=0.01)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', 
-                                                             patience=3, factor=0.5)
+                                                               patience=3, factor=0.5)
 
         best_val_loss = float('inf')
         early_stopping_counter = 0
@@ -104,7 +122,7 @@ def train_lstm(df):
                 outputs = model(X_batch)
                 loss = criterion(outputs, y_batch.view(-1, 1))
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # Added gradient clipping
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 epoch_loss += loss.item()
             
@@ -119,18 +137,16 @@ def train_lstm(df):
             train_losses.append(epoch_loss / len(train_loader))
             val_losses.append(val_loss / len(test_loader))
             
-            # Learning rate scheduling
             scheduler.step(val_loss)
             
-            # Early stopping check
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 early_stopping_counter = 0
-                # Save best model
+                # Save best model in models directory
                 torch.save({
                     'model_state_dict': model.state_dict(),
                     'vectorizer': vectorizer
-                }, 'lstm_model.pth')
+                }, 'models/lstm_model.pth')
             else:
                 early_stopping_counter += 1
             
@@ -143,14 +159,13 @@ def train_lstm(df):
         st.success("Training completed!")
 
         # Load best model for evaluation
-        checkpoint = torch.load('lstm_model.pth')
+        checkpoint = torch.load('models/lstm_model.pth')
         model.load_state_dict(checkpoint['model_state_dict'])
         
         # Evaluate model
         model.eval()
         y_train_pred = []
         y_test_pred = []
-        y_test_prob = []
         
         with torch.no_grad():
             for X_batch, _ in train_loader:
@@ -159,7 +174,6 @@ def train_lstm(df):
             
             for X_batch, _ in test_loader:
                 outputs = torch.sigmoid(model(X_batch))
-                y_test_prob.extend(outputs.numpy())
                 y_test_pred.extend((outputs > 0.5).numpy())
 
         # Calculate metrics
@@ -168,12 +182,14 @@ def train_lstm(df):
         class_report = classification_report(y_test, y_test_pred, output_dict=True)
         conf_matrix = confusion_matrix(y_test, y_test_pred)
         
-        # Create visualization for confusion matrix
+        # Metrics visualization
         plt.figure(figsize=(8, 6))
         sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues',
                     xticklabels=['Non-Hate', 'Hate'],
                     yticklabels=['Non-Hate', 'Hate'])
         plt.title('Confusion Matrix')
+        plt.savefig('models/confusion_matrix.png')
+        plt.close()
         
         metrics = {
             'train_accuracy': train_accuracy,
@@ -187,7 +203,7 @@ def train_lstm(df):
         }
 
         # Save metrics
-        pd.DataFrame([metrics]).to_json('model_metrics.json')
+        pd.DataFrame([metrics]).to_json('models/model_metrics.json')
         
         return model, vectorizer, metrics
     
@@ -286,9 +302,16 @@ def create_streamlit_app():
     st.title("Advanced YouTube Hate Speech Detector (LSTM)")
     
     try:
-        if os.path.exists('lstm_model.pth'):
-            checkpoint = torch.load('lstm_model.pth')
-            model = ImprovedLSTMModel(1000, 128, 1)  # Dimensiones exactas del modelo original
+        if os.path.exists('models/lstm_model.pth'):
+            checkpoint = torch.load('models/lstm_model.pth')
+            
+            # Usa los mismos hiperparámetros que en train_lstm()
+            model = ImprovedLSTMModel(
+                input_size=1000,     # Coincide con max_features en TfidfVectorizer
+                hidden_size=256,     # El tamaño de hidden_size usado en train_lstm()
+                output_size=1,
+                num_layers=2         # El número de capas LSTM usado
+            )
             model.load_state_dict(checkpoint['model_state_dict'])
             vectorizer = checkpoint['vectorizer']
         else:
@@ -352,6 +375,29 @@ def create_streamlit_app():
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
+        
+    # Show confusion matrix
+    if os.path.exists('models/confusion_matrix.png'):
+        st.subheader("Confusion Matrix")
+        st.image('models/confusion_matrix.png', caption='Model Performance Visualization')
+
+    # Display detailed metrics table
+    if os.path.exists('models/model_metrics.json'):
+        metrics = pd.read_json('models/model_metrics.json').iloc[0].to_dict()
+        
+        st.subheader("Detailed Performance Metrics")
+        
+        # Create a more comprehensive metrics display
+        metrics_df = pd.DataFrame([
+            {"Metric": "Training Accuracy", "Value": f"{metrics['train_accuracy']:.2%}"},
+            {"Metric": "Testing Accuracy", "Value": f"{metrics['test_accuracy']:.2%}"},
+            {"Metric": "Overfitting", "Value": f"{metrics['train_accuracy'] - metrics['test_accuracy']:.2%}"},
+            {"Metric": "Precision (Hate Class)", "Value": f"{metrics['classification_report']['1']['precision']:.2%}"},
+            {"Metric": "Recall (Hate Class)", "Value": f"{metrics['classification_report']['1']['recall']:.2%}"},
+            {"Metric": "F1-Score (Hate Class)", "Value": f"{metrics['classification_report']['1']['f1-score']:.2%}"}
+        ])
+        
+        st.table(metrics_df)
 
 if __name__ == "__main__":
     create_streamlit_app()
