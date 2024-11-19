@@ -16,7 +16,7 @@ class HateSpeechDetector:
         # Use a pipeline to standardize the process
         self.pipeline = Pipeline([
             ('vectorizer', TfidfVectorizer(
-                max_features=800,  # Reduced number of features to reduce noise
+                max_features=1000,  # Reduced number of features to reduce noise
                 ngram_range=(1, 2),
                 min_df=3,  # Adjusted to filter out noise
                 max_df=0.9,  # More strict about frequent terms

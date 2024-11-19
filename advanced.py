@@ -312,7 +312,15 @@ def create_streamlit_app():
                 output_size=1,
                 num_layers=2         # El número de capas LSTM usado
             )
-            model.load_state_dict(checkpoint['model_state_dict'])
+
+            # Only load state dict keys that match current model
+            current_model_dict = model.state_dict()
+            filtered_state_dict = {k: v for k, v in checkpoint['model_state_dict'].items() 
+                                   if k in current_model_dict}
+            
+            # Load the filtered state dict
+            model.load_state_dict(filtered_state_dict, strict=False)
+            
             vectorizer = checkpoint['vectorizer']
         else:
             st.info("Training new model... This may take a few minutes.")

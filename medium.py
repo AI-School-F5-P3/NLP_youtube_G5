@@ -57,7 +57,7 @@ class YouTubeCommentScraper:
 class HateSpeechDetector:
     def __init__(self):
         # Create base classifiers
-        clf1 = LogisticRegression(C=0.1, class_weight='balanced', random_state=42)
+        clf1 = LogisticRegression(C=0.05, class_weight='balanced', random_state=42)
         clf2 = MultinomialNB(alpha=0.1)
         clf3 = SVC(C=0.1, class_weight='balanced', random_state=42, probability=True)
 
