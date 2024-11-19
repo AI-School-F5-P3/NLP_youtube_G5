@@ -8,7 +8,7 @@ from sklearn.naive_bayes import MultinomialNB
 from sklearn.svm import SVC
 from sklearn.metrics import classification_report
 import streamlit as st
-import pickle
+import joblib
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 import requests
@@ -18,8 +18,9 @@ import googleapiclient.discovery
 import os
 from dotenv import load_dotenv
 
-# Cargar las variables de entorno desde el archivo .env
+# Load environment variables from .env file
 load_dotenv()
+
 class YouTubeCommentScraper:
     def __init__(self):
         self.api_key = os.getenv("YOUTUBE_API_KEY")
@@ -41,7 +42,7 @@ class YouTubeCommentScraper:
     def get_comments(self, video_url, max_comments=100):
         video_id = self.extract_video_id(video_url)
         if not video_id:
-            raise ValueError("URL de video inválida")
+            raise ValueError("Invalid video URL")
 
         try:
             request = self.youtube.commentThreads().list(
@@ -54,16 +55,16 @@ class YouTubeCommentScraper:
             comments = [item["snippet"]["topLevelComment"]["snippet"]["textDisplay"] for item in response["items"]]
             return comments
         except Exception as e:
-            raise Exception(f"Error al obtener los comentarios del video: {str(e)}")
+            raise Exception(f"Error getting video comments: {str(e)}")
 
 class HateSpeechDetector:
     def __init__(self):
-        # Crear clasificadores base
+        # Create base classifiers
         clf1 = LogisticRegression(C=0.1, class_weight='balanced', random_state=42)
         clf2 = MultinomialNB(alpha=0.1)
         clf3 = SVC(C=0.1, class_weight='balanced', random_state=42, probability=True)
 
-        # Crear ensemble
+        # Create ensemble
         self.pipeline = Pipeline([
             ('vectorizer', TfidfVectorizer(
                 max_features=3000,
@@ -83,6 +84,7 @@ class HateSpeechDetector:
             ))
         ])
         self.scraper = YouTubeCommentScraper()
+        self.metrics = None  # Store metrics for later use
 
     def prepare_target(self, df):
         hate_columns = ['IsToxic', 'IsAbusive', 'IsThreat', 'IsProvocative',
@@ -105,13 +107,15 @@ class HateSpeechDetector:
 
         train_acc = np.mean(train_pred == y_train)
         test_acc = np.mean(test_pred == y_test)
-
-        return {
+        
+        self.metrics = {
             'train_accuracy': train_acc,
             'test_accuracy': test_acc,
             'overfitting': train_acc - test_acc,
             'classification_report': classification_report(y_test, test_pred)
         }
+        
+        return self.metrics
 
     def analyze_video(self, video_url):
         try:
@@ -128,7 +132,7 @@ class HateSpeechDetector:
 
             return results
         except Exception as e:
-            raise Exception(f"Error al analizar el video: {str(e)}")
+            raise Exception(f"Error analyzing video: {str(e)}")
 
     def predict(self, texts):
         if isinstance(texts, str):
@@ -136,73 +140,126 @@ class HateSpeechDetector:
         return self.pipeline.predict_proba(texts)[:, 1]
 
     def save_model(self, path):
-        with open(path, 'wb') as f:
-            pickle.dump(self.pipeline, f)
+        # Create the models directory if it doesn't exist
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
+        # Save the model
+        joblib.dump(self.pipeline, path)
+        
+        # Save metrics in the same directory
+        metrics_path = os.path.join(os.path.dirname(path), 'model_metrics.joblib')
+        joblib.dump(self.metrics, metrics_path)
+        
+        print(f"Model saved at: {path}")
+        print(f"Metrics saved at: {metrics_path}")
 
     @classmethod
     def load_model(cls, path):
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"The model file was not found at: {path}")
+        
         detector = cls()
-        with open(path, 'rb') as f:
-            detector.pipeline = pickle.load(f)
+        detector.pipeline = joblib.load(path)
+        
+        # Load metrics if they exist
+        metrics_path = os.path.join(os.path.dirname(path), 'model_metrics.joblib')
+        try:
+            detector.metrics = joblib.load(metrics_path)
+        except:
+            detector.metrics = None
+            
         return detector
 
 def create_streamlit_app():
-    st.title("Detector de Mensajes de Odio")
+    st.title("Hate Speech Detector")
+
+    # Define model path in the models directory
+    model_path = os.path.join('models', 'hate_speech_model.joblib')
 
     try:
-        detector = HateSpeechDetector.load_model('hate_speech_model_enhanced.pkl')
-    except:
-        st.error("No se encontró un modelo entrenado. Por favor, entrene el modelo primero.")
+        detector = HateSpeechDetector.load_model(model_path)
+    except FileNotFoundError:
+        st.error(f"No trained model found at {model_path}. Please train the model first.")
         return
 
-    tab1, tab2 = st.tabs(["Analizar Texto", "Analizar Video de YouTube"])
+    tab1, tab2 = st.tabs(["Analyze Text", "Analyze YouTube Video"])
 
     with tab1:
-        text_input = st.text_area("Introduce el texto a analizar:")
-        if st.button("Analizar Texto"):
+        text_input = st.text_area("Enter text to analyze:")
+        if st.button("Analyze Text"):
             if text_input:
                 probability = detector.predict(text_input)[0]
-                st.write(f"Probabilidad de contenido de odio: {probability:.2%}")
+                st.write(f"Hate speech probability: {probability:.2%}")
 
                 if probability > 0.5:
-                    st.error("⚠️ Este texto puede contener mensajes de odio.")
+                    st.error("⚠️ This text may contain hate speech.")
                 else:
-                    st.success("✅ Este texto parece seguro.")
+                    st.success("✅ This text appears to be safe.")
+
+                # Display metrics if available
+                if detector.metrics:
+                    st.subheader("Model Metrics:")
+                    metrics_df = pd.DataFrame({
+                        'Metric': ['Training Accuracy', 'Test Accuracy', 'Overfitting'],
+                        'Value': [
+                            f"{detector.metrics['train_accuracy']:.4f}",
+                            f"{detector.metrics['test_accuracy']:.4f}",
+                            f"{detector.metrics['overfitting']:.4f}"
+                        ]
+                    })
+                    st.table(metrics_df)
 
     with tab2:
-        video_url = st.text_input("Introduce la URL del video de YouTube:")
-        if st.button("Analizar Video"):
+        video_url = st.text_input("Enter YouTube video URL:")
+        if st.button("Analyze Video"):
             if video_url:
-                with st.spinner("Analizando comentarios..."):
+                with st.spinner("Analyzing comments..."):
                     try:
                         results = detector.analyze_video(video_url)
 
                         hate_comments = [r for r in results if r['is_hate']]
-                        st.write(f"Se encontraron {len(hate_comments)} comentarios potencialmente ofensivos de {len(results)} analizados.")
+                        st.write(f"Found {len(hate_comments)} potentially offensive comments out of {len(results)} analyzed.")
 
                         for result in results:
                             if result['is_hate']:
-                                st.error(f"⚠️ {result['comment']}\nProbabilidad: {result['hate_probability']:.2%}")
+                                st.error(f"⚠️ {result['comment']}\nProbability: {result['hate_probability']:.2%}")
                             else:
-                                st.success(f"✅ {result['comment']}\nProbabilidad: {result['hate_probability']:.2%}")
-                    except Exception as e:
-                        st.error(f"Error al analizar el video: {str(e)}")
+                                st.success(f"✅ {result['comment']}\nProbability: {result['hate_probability']:.2%}")
 
-# Entrenamiento del modelo y guardado del archivo .pkl
+                        # Display metrics if available
+                        if detector.metrics:
+                            st.subheader("Model Metrics:")
+                            metrics_df = pd.DataFrame({
+                                'Metric': ['Training Accuracy', 'Test Accuracy', 'Overfitting'],
+                                'Value': [
+                                    f"{detector.metrics['train_accuracy']:.4f}",
+                                    f"{detector.metrics['test_accuracy']:.4f}",
+                                    f"{detector.metrics['overfitting']:.4f}"
+                                ]
+                            })
+                            st.table(metrics_df)
+                            
+                    except Exception as e:
+                        st.error(f"Error analyzing video: {str(e)}")
+
+# Training the model and saving the .joblib file
 if __name__ == "__main__":
-    # Cargar los datos de entrenamiento
+    # Load training data
     df = pd.read_csv('youtoxic_english_1000.csv')
     
-    # Crear y entrenar el detector de mensajes de odio
+    # Create and train the hate speech detector
     detector = HateSpeechDetector()
     metrics = detector.train(df)
-    print("Métricas del modelo:")
+    
+    print("Model metrics:")
     for key, value in metrics.items():
         print(f"{key}: {value}")
     print(f"Classification Report:\n{metrics['classification_report']}")
     
-    # Guardar el modelo entrenado
-    detector.save_model('hate_speech_model_enhanced.pkl')
+    # Save the trained model in the models directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(current_dir, 'models', 'hate_speech_model.joblib')
+    detector.save_model(model_path)
 
-    # Ahora puedes cargar y usar el modelo guardado en la interfaz Streamlit
+    # Now you can load and use the saved model in the Streamlit interface
     create_streamlit_app()

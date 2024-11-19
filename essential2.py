@@ -9,61 +9,64 @@ import streamlit as st
 import joblib
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import cross_val_score
+from sklearn.decomposition import TruncatedSVD
+import os
 
-# Cargar el modelo de lenguaje de spacy para lematización
+# Load the spaCy language model for lemmatization
 nlp = spacy.load("en_core_web_sm")
 
 class HateSpeechDetector:
     def __init__(self):
-        # Usar pipeline para estandarizar el proceso
+        # Use a pipeline to standardize the process
         self.pipeline = Pipeline([
             ('vectorizer', TfidfVectorizer(
-                max_features=1000,  # Reducido aún más para evitar overfitting
+                max_features=1000,  # Reduced further to avoid overfitting
                 ngram_range=(1, 1),
-                min_df=5,  # Aumentado para reducir términos poco frecuentes
-                max_df=0.75,  # Ajustado para ser más restrictivo
+                min_df=5,  # Increased to reduce infrequent terms
+                max_df=0.75,  # Adjusted to be more restrictive
                 stop_words='english'
             )),
+            ('dim_reduction', TruncatedSVD(n_components=100, random_state=42)),  # Dimensionality reduction
             ('classifier', LogisticRegression(
-                C=0.001,  # Regularización ajustada (un valor de C mayor que 0.01 para evitar underfitting)
-                class_weight='balanced',  # Manejar desbalance de clases
+                C=0.001,  # Adjusted regularization (higher C value to avoid underfitting)
+                class_weight='balanced',  # Handle class imbalance
                 random_state=42,
                 max_iter=1000
             ))
         ])
         
     def prepare_target(self, df):
-        """Combina todas las columnas objetivo en una sola etiqueta de odio"""
+        """Combines all target columns into a single hate label"""
         hate_columns = ['IsToxic', 'IsAbusive', 'IsThreat', 'IsProvocative', 
                        'IsObscene', 'IsHatespeech', 'IsRacist']
         return (df[hate_columns].sum(axis=1) > 0).astype(int)
     
     def preprocess_text(self, text):
-        """Preprocesa el texto con lematización usando spaCy"""
+        """Preprocess the text with lemmatization using spaCy"""
         doc = nlp(text)
         return " ".join([token.lemma_ for token in doc if not token.is_stop])
     
     def train(self, df):
-        """Entrena el modelo con los datos proporcionados"""
-        # Preprocesar los textos
+        """Train the model with the provided data"""
+        # Preprocess the texts
         df['Processed_Text'] = df['Text'].apply(self.preprocess_text)
         
-        # Preparar features y target
+        # Prepare features and target
         X = df['Processed_Text']
         y = self.prepare_target(df)
         
-        # División del conjunto de datos
+        # Split the dataset
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42, stratify=y
-        ) # stratify asegura que la proporción de clases en el conjunto de entrenamiento y prueba sea la misma que en el dataset original, importante para problemas de clasificación desbalanceados
+        ) # Stratify ensures that the class proportions in train and test sets match those of the original dataset, important for imbalanced classification problems
         
-        # Entrenamiento
+        # Train the model
         self.pipeline.fit(X_train, y_train)
         
-        # Evaluación con validación cruzada (10 pliegues para mayor robustez)
+        # Evaluate with cross-validation (10 folds for robustness)
         cv_scores = cross_val_score(self.pipeline, X_train, y_train, cv=5)
         
-        # Predicciones finales
+        # Final predictions
         train_pred = self.pipeline.predict(X_train)
         test_pred = self.pipeline.predict(X_test)
         
@@ -80,52 +83,60 @@ class HateSpeechDetector:
         }
     
     def predict(self, text):
-        """Predice si un texto contiene mensajes de odio"""
+        """Predict whether the text contains hate speech"""
         if isinstance(text, str):
             text = [text]
         return self.pipeline.predict_proba(text)[:, 1]
     
     def save_model(self, path):
-        """Guarda el modelo entrenado"""
+        """Save the trained model"""
+        # Create the "models" directory if it doesn't exist
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         joblib.dump(self.pipeline, path)
     
     @classmethod
     def load_model(cls, path):
-        """Carga un modelo guardado"""
+        """Load a saved model"""
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"The model file was not found at: {path}")
+        
         detector = cls()
         detector.pipeline = joblib.load(path)
         return detector
 
-# Interfaz Streamlit
+# Streamlit Interface
 def create_streamlit_app(detector, metrics):
-    st.title("Detector de Mensajes de Odio")
+    st.title("Hate Speech Detector")
     
-    # Cargar modelo
+    # Path of the model in the `models` folder
+    model_path = os.path.join('models', 'hate_speech_model.pkl')
+    
+    # Load model
     try:
-        detector = HateSpeechDetector.load_model('hate_speech_model.pkl')
-    except:
-        st.error("No se encontró un modelo entrenado. Por favor, entrene el modelo primero.")
+        detector = HateSpeechDetector.load_model(model_path)
+    except FileNotFoundError:
+        st.error(f"Trained model not found at {model_path}. Please train the model first.")
         return
     
-    # Área de texto para input
-    text_input = st.text_area("Introduce el texto a analizar:")
+    # Text area for input
+    text_input = st.text_area("Enter the text to analyze:")
     
-    if st.button("Analizar"):
+    if st.button("Analyze"):
         if text_input:
             probability = detector.predict(text_input)[0]
-            st.write(f"Probabilidad de contenido de odio: {probability:.2%}")
+            st.write(f"Hate speech probability: {probability:.2%}")
             
             if probability > 0.5:
-                st.error("⚠️ Este texto puede contener mensajes de odio.")
+                st.error("⚠️ This text may contain hate speech.")
             else:
-                st.success("✅ Este texto parece seguro.")
+                st.success("✅ This text seems safe.")
         else:
-            st.warning("Por favor, introduce algún texto para analizar.")
+            st.warning("Please enter some text to analyze.")
             
-        st.subheader("Métricas del modelo:")
+        st.subheader("Model Metrics:")
         metrics_df = pd.DataFrame({
-            'Métrica': ['Precisión de entrenamiento', 'Precisión de prueba', 'Promedio de validación cruzada', 'Desviación estándar de validación cruzada', 'Overfitting'],
-            'Valor': [
+            'Metric': ['Training Accuracy', 'Test Accuracy', 'Cross-Validation Mean', 'Cross-Validation Std', 'Overfitting'],
+            'Value': [
                 f"{metrics['train_accuracy']:.4f}",
                 f"{metrics['test_accuracy']:.4f}",
                 f"{metrics['cv_scores_mean']:.4f}",
@@ -135,20 +146,23 @@ def create_streamlit_app(detector, metrics):
         })
         st.table(metrics_df)
     else:
-        st.warning("Por favor, introduce algún texto para analizar.")
+        st.warning("Please enter some text to analyze.")
 
 if __name__ == "__main__":
-    # Cargar y entrenar el modelo
+    # Load and train the model
     df = pd.read_csv('youtoxic_english_1000.csv')
     detector = HateSpeechDetector()
     metrics = detector.train(df)
-    print("Métricas del modelo:")
+    print("Model metrics:")
     for key, value in metrics.items():
         print(f"{key}: {value}")
     print(f"Classification Report:\n{metrics['classification_report']}")
     
-    # Guardar el modelo
-    detector.save_model('hate_speech_model.pkl')
+    # Save the model in the "models" folder
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(current_dir, 'models', 'hate_speech_model.pkl')
+    print(f"Model saved at: {model_path}")
+    detector.save_model(model_path)
     
-    # Ejecutar la app
+    # Run the app
     create_streamlit_app(detector, metrics)
