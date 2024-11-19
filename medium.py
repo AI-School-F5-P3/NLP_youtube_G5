@@ -16,13 +16,13 @@ from bs4 import BeautifulSoup
 import re
 import googleapiclient.discovery
 import os
-from dotenv import load_dotenv
+#from dotenv import load_dotenv
 
 # Cargar las variables de entorno desde el archivo .env
-load_dotenv()
+#load_dotenv()
 class YouTubeCommentScraper:
     def __init__(self):
-        self.api_key = os.getenv("YOUTUBE_API_KEY")
+        self.api_key = "AIzaSyAnz3_21wonjoG6DuwwAIbdyius7f955jk"
         self.youtube = googleapiclient.discovery.build('youtube', 'v3', developerKey=self.api_key)
 
     def extract_video_id(self, url):
