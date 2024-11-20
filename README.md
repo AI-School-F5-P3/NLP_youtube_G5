@@ -61,7 +61,7 @@ We explored multiple approaches to solve this problem:
 - Used Docker for easy deployment and scalability in production
 
 ## Project Structure
-
+```
 django/
 ├── advanced/
 │   ├── __pycache__/
@@ -106,6 +106,7 @@ django/
 ├── db.sqlite3
 ├── manage.py
 └── youtoxic_english_1000.csv
+```
 
 ## Setup and Installation
 
