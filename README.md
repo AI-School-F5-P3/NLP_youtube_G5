@@ -61,7 +61,51 @@ We explored multiple approaches to solve this problem:
 - Used Docker for easy deployment and scalability in production
 
 ## Project Structure
-django/ ├── advanced/ │ ├── pycache/ │ ├── migrations/ │ ├── models/ │ ├── templates/ │ │ └── advanced/ │ │ ├── about.html │ │ ├── base.html │ │ ├── lstm.html │ │ ├── metrics.html │ │ └── video_analysis.html │ ├── init.py │ ├── admin.py │ ├── apps.py │ ├── check_config.py │ ├── lstm_model.py │ ├── ml_lstm_model.py │ ├── ml_models.py │ ├── models.py │ ├── tasks.py │ ├── tests.py │ ├── train_model.py │ ├── urls.py │ ├── utils.py │ └── views.py │ ├── hate_detection/ │ ├── pycache/ │ ├── init.py │ ├── asgi.py │ ├── celery.py │ ├── settings.py │ ├── urls.py │ └── wsgi.py │ ├── static/ │ ├── css/ │ └── js/ │ ├── lstm_analysis_handler.js │ └── video_analysis_handler.js │ ├── media/ ├── .env ├── db.sqlite3 ├── manage.py └── youtoxic_english_1000.csv
+
+django/
+├── advanced/
+│   ├── __pycache__/
+│   ├── migrations/
+│   ├── models/
+│   ├── templates/
+│   │   └── advanced/
+│   │       ├── about.html
+│   │       ├── base.html
+│   │       ├── lstm.html
+│   │       ├── metrics.html
+│   │       └── video_analysis.html
+│   ├── __init__.py
+│   ├── admin.py
+│   ├── apps.py
+│   ├── check_config.py
+│   ├── lstm_model.py
+│   ├── ml_lstm_model.py
+│   ├── ml_models.py
+│   ├── models.py
+│   ├── tasks.py
+│   ├── tests.py
+│   ├── train_model.py
+│   ├── urls.py
+│   ├── utils.py
+│   └── views.py
+├── hate_detection/
+│   ├── __pycache__/
+│   ├── __init__.py
+│   ├── asgi.py
+│   ├── celery.py
+│   ├── settings.py
+│   ├── urls.py
+│   └── wsgi.py
+├── static/
+│   ├── css/
+│   └── js/
+│       ├── lstm_analysis_handler.js
+│       └── video_analysis_handler.js
+├── media/
+├── .env
+├── db.sqlite3
+├── manage.py
+└── youtoxic_english_1000.csv
 
 ## Setup and Installation
 
