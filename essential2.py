@@ -21,9 +21,9 @@ class HateSpeechDetector:
         self.pipeline = Pipeline([
             ('vectorizer', TfidfVectorizer(
                 max_features=1000,  # Reduced further to avoid overfitting
-                ngram_range=(1, 1),
-                min_df=5,  # Increased to reduce infrequent terms
-                max_df=0.75,  # Adjusted to be more restrictive
+                ngram_range=(1, 2),
+                min_df=3,  # Increased to reduce infrequent terms
+                max_df=0.9,  # Adjusted to be more restrictive
                 stop_words='english'
             )),
             ('dim_reduction', TruncatedSVD(n_components=100, random_state=42)),  # Dimensionality reduction
