@@ -1,11 +1,8 @@
 # NLP for Hate Speech Detection in YouTube Comments
-
-![YouTube Logo](https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/200px-YouTube_full-color_icon_%282017%29.svg.png)
-
 ![alt text](image.png)
 
 ## Project Overview
-
+![alt text](image-1.png)
 This project aims to develop an automated solution for detecting hate speech in YouTube comments using Natural Language Processing (NLP) techniques. The goal is to create a scalable and efficient system to improve content moderation and user experience on the platform.
 
 ## Motivation
