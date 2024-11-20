@@ -123,5 +123,5 @@ python -m venv venv
 # Activate the virtual environment
 source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
 
-# Install dependencies
+# Install dependencies. Python 3.11 was used for this project
 pip install -r requirements.txt
